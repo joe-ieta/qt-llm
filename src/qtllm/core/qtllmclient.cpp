@@ -1,5 +1,6 @@
-﻿#include "qtllmclient.h"
+#include "qtllmclient.h"
 
+#include "../identity/compactid.h"
 #include "../logging/qtllmlogger.h"
 #include "../network/httpexecutor.h"
 #include "../providers/illmprovider.h"
@@ -13,7 +14,6 @@
 #include <QDateTime>
 #include <QJsonObject>
 #include <QUrlQuery>
-#include <QUuid>
 
 namespace qtllm {
 
@@ -149,9 +149,9 @@ void QtLLMClient::dispatchRequest(const LlmRequest &request)
         resolved.model = m_config.model;
     }
     m_activeRequest = resolved;
-    m_activeRequestId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    m_activeRequestId = identity::generateId(identity::IdKind::Request);
     if (m_toolLoopTraceId.trimmed().isEmpty()) {
-        m_toolLoopTraceId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        m_toolLoopTraceId = identity::generateId(identity::IdKind::Trace);
     }
 
     const QNetworkRequest networkRequest = m_provider->buildRequest(resolved);

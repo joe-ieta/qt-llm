@@ -1,9 +1,10 @@
 #include "toolsinsidetracerecorder.h"
 
+#include "../identity/compactid.h"
+
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMutexLocker>
-#include <QUuid>
 
 namespace qtllm::toolsinside {
 
@@ -23,6 +24,8 @@ QJsonObject toJson(const qtllm::tools::runtime::ToolCallRequest &request)
 {
     return QJsonObject{
         {QStringLiteral("callId"), request.callId},
+        {QStringLiteral("externalCallId"), request.externalCallId},
+        {QStringLiteral("internalToolCallId"), request.internalToolCallId},
         {QStringLiteral("toolId"), request.toolId},
         {QStringLiteral("arguments"), request.arguments},
         {QStringLiteral("idempotencyKey"), request.idempotencyKey}
@@ -33,6 +36,8 @@ QJsonObject toJson(const qtllm::tools::runtime::ToolExecutionResult &result)
 {
     return QJsonObject{
         {QStringLiteral("callId"), result.callId},
+        {QStringLiteral("externalCallId"), result.externalCallId},
+        {QStringLiteral("internalToolCallId"), result.internalToolCallId},
         {QStringLiteral("toolId"), result.toolId},
         {QStringLiteral("success"), result.success},
         {QStringLiteral("output"), result.output},
@@ -65,11 +70,15 @@ QString ToolsInsideTraceRecorder::startTrace(const QString &clientId,
                                              const QString &vendor)
 {
     if (!m_repository) {
-        return traceId;
+        return traceId.trimmed();
     }
 
+    const QString resolvedTraceId = traceId.trimmed().isEmpty()
+        ? identity::generateId(identity::IdKind::Trace)
+        : traceId.trimmed();
+
     ToolsInsideTraceSummary trace;
-    trace.traceId = traceId;
+    trace.traceId = resolvedTraceId;
     trace.clientId = clientId;
     trace.sessionId = sessionId;
     trace.status = QStringLiteral("running");
@@ -81,14 +90,14 @@ QString ToolsInsideTraceRecorder::startTrace(const QString &clientId,
 
     {
         QMutexLocker locker(&m_mutex);
-        m_clientIdByTrace.insert(traceId, clientId);
-        m_sessionIdByTrace.insert(traceId, sessionId);
+        m_clientIdByTrace.insert(resolvedTraceId, clientId);
+        m_sessionIdByTrace.insert(resolvedTraceId, sessionId);
     }
 
     if (m_storagePolicy.persistRawPrompt) {
         persistArtifact(clientId,
                         sessionId,
-                        traceId,
+                        resolvedTraceId,
                         QStringLiteral("turn_input"),
                         QStringLiteral("text/plain"),
                         turnInput.toUtf8(),
@@ -97,7 +106,8 @@ QString ToolsInsideTraceRecorder::startTrace(const QString &clientId,
     }
 
     ToolsInsideEventRecord event;
-    event.traceId = traceId;
+    event.eventId = identity::generateId(identity::IdKind::Event);
+    event.traceId = resolvedTraceId;
     event.category = QStringLiteral("trace");
     event.name = QStringLiteral("turn_started");
     event.payload = QJsonObject{
@@ -107,7 +117,7 @@ QString ToolsInsideTraceRecorder::startTrace(const QString &clientId,
         {QStringLiteral("inputLength"), turnInput.size()}
     };
     m_repository->upsertEvent(event, nullptr);
-    return traceId;
+    return resolvedTraceId;
 }
 
 void ToolsInsideTraceRecorder::recordToolSelection(const QString &traceId,
@@ -144,6 +154,7 @@ void ToolsInsideTraceRecorder::recordToolSelection(const QString &traceId,
     }
 
     ToolsInsideEventRecord event;
+    event.eventId = identity::generateId(identity::IdKind::Event);
     event.traceId = traceId;
     event.category = QStringLiteral("tool.selection");
     event.name = QStringLiteral("tool_selection_completed");
@@ -177,6 +188,7 @@ void ToolsInsideTraceRecorder::recordRequestPrepared(const QString &clientId,
     }
 
     ToolsInsideEventRecord event;
+    event.eventId = identity::generateId(identity::IdKind::Event);
     event.traceId = traceId;
     event.category = QStringLiteral("llm.request");
     event.name = QStringLiteral("request_prepared");
@@ -237,6 +249,7 @@ void ToolsInsideTraceRecorder::recordRequestDispatched(const QString &clientId,
     }
 
     ToolsInsideEventRecord event;
+    event.eventId = identity::generateId(identity::IdKind::Event);
     event.traceId = traceId;
     event.spanId = spanId;
     event.requestId = requestId;
@@ -283,6 +296,7 @@ void ToolsInsideTraceRecorder::recordFirstStreamToken(const QString &traceId,
     }
 
     ToolsInsideEventRecord event;
+    event.eventId = identity::generateId(identity::IdKind::Event);
     event.traceId = traceId;
     event.spanId = ensureSpanId(requestSpanKey(traceId, requestId));
     event.requestId = requestId;
@@ -308,6 +322,7 @@ void ToolsInsideTraceRecorder::recordResponseParsed(const QString &traceId,
     }
 
     ToolsInsideEventRecord event;
+    event.eventId = identity::generateId(identity::IdKind::Event);
     event.traceId = traceId;
     event.spanId = ensureSpanId(requestSpanKey(traceId, requestId));
     event.requestId = requestId;
@@ -338,6 +353,7 @@ void ToolsInsideTraceRecorder::recordToolCallsParsed(const qtllm::tools::runtime
     }
 
     ToolsInsideEventRecord event;
+    event.eventId = identity::generateId(identity::IdKind::Event);
     event.traceId = context.traceId;
     event.spanId = ensureSpanId(requestSpanKey(context.traceId, requestId));
     event.requestId = requestId;
@@ -399,7 +415,10 @@ void ToolsInsideTraceRecorder::recordToolCallStarted(const qtllm::tools::runtime
     }
 
     ToolsInsideToolCallRecord toolCall;
-    toolCall.toolCallId = request.callId.trimmed().isEmpty() ? QUuid::createUuid().toString(QUuid::WithoutBraces) : request.callId.trimmed();
+    toolCall.toolCallId = request.internalToolCallId.trimmed().isEmpty()
+        ? identity::generateId(identity::IdKind::ToolCall)
+        : request.internalToolCallId.trimmed();
+    toolCall.externalCallId = request.externalCallId.trimmed().isEmpty() ? request.callId.trimmed() : request.externalCallId.trimmed();
     toolCall.traceId = context.traceId;
     toolCall.requestId = requestId;
     toolCall.toolId = request.toolId;
@@ -446,7 +465,12 @@ void ToolsInsideTraceRecorder::recordToolCallFinished(const qtllm::tools::runtim
     }
 
     ToolsInsideToolCallRecord toolCall;
-    toolCall.toolCallId = result.callId.trimmed().isEmpty() ? request.callId : result.callId;
+    toolCall.toolCallId = result.internalToolCallId.trimmed().isEmpty()
+        ? (request.internalToolCallId.trimmed().isEmpty() ? identity::generateId(identity::IdKind::ToolCall) : request.internalToolCallId.trimmed())
+        : result.internalToolCallId.trimmed();
+    toolCall.externalCallId = result.externalCallId.trimmed().isEmpty()
+        ? (request.externalCallId.trimmed().isEmpty() ? result.callId.trimmed() : request.externalCallId.trimmed())
+        : result.externalCallId.trimmed();
     toolCall.traceId = context.traceId;
     toolCall.requestId = requestId;
     toolCall.toolId = result.toolId.isEmpty() ? request.toolId : result.toolId;
@@ -481,6 +505,7 @@ void ToolsInsideTraceRecorder::recordToolCallFinished(const qtllm::tools::runtim
     m_repository->upsertSpan(span, nullptr);
 
     ToolsInsideEventRecord event;
+    event.eventId = identity::generateId(identity::IdKind::Event);
     event.traceId = context.traceId;
     event.spanId = span.spanId;
     event.requestId = requestId;
@@ -516,8 +541,11 @@ void ToolsInsideTraceRecorder::recordFollowUpPrompt(const qtllm::tools::runtime:
         resultArray.append(toJson(result));
 
         ToolsInsideSupportLink link;
+        link.supportLinkId = identity::generateId(identity::IdKind::SupportLink);
         link.traceId = context.traceId;
-        link.toolCallId = result.callId;
+        link.toolCallId = result.internalToolCallId.trimmed().isEmpty()
+            ? (result.callId.trimmed().isEmpty() ? QString() : result.callId.trimmed())
+            : result.internalToolCallId.trimmed();
         link.targetKind = QStringLiteral("artifact");
         link.targetId = artifactId;
         link.supportType = QStringLiteral("consumed_by_followup");
@@ -526,9 +554,12 @@ void ToolsInsideTraceRecorder::recordFollowUpPrompt(const qtllm::tools::runtime:
         m_repository->upsertSupportLink(link, nullptr);
 
         ToolsInsideToolCallRecord toolCall;
-        toolCall.toolCallId = result.callId;
+        toolCall.toolCallId = result.internalToolCallId.trimmed().isEmpty()
+            ? (result.callId.trimmed().isEmpty() ? identity::generateId(identity::IdKind::ToolCall) : result.callId.trimmed())
+            : result.internalToolCallId.trimmed();
         toolCall.traceId = context.traceId;
         toolCall.requestId = requestId;
+        toolCall.externalCallId = result.externalCallId.trimmed().isEmpty() ? result.callId.trimmed() : result.externalCallId.trimmed();
         toolCall.followupArtifactId = artifactId;
         toolCall.roundIndex = roundIndex;
         toolCall.status = result.success ? QStringLiteral("success") : QStringLiteral("failed");
@@ -536,6 +567,7 @@ void ToolsInsideTraceRecorder::recordFollowUpPrompt(const qtllm::tools::runtime:
     }
 
     ToolsInsideEventRecord event;
+    event.eventId = identity::generateId(identity::IdKind::Event);
     event.traceId = context.traceId;
     event.spanId = ensureSpanId(batchSpanKey(context.traceId, requestId, roundIndex));
     event.requestId = requestId;
@@ -570,6 +602,7 @@ void ToolsInsideTraceRecorder::recordFailureGuard(const qtllm::tools::runtime::T
     }
 
     ToolsInsideEventRecord event;
+    event.eventId = identity::generateId(identity::IdKind::Event);
     event.traceId = context.traceId;
     event.spanId = ensureSpanId(requestSpanKey(context.traceId, requestId));
     event.requestId = requestId;
@@ -604,6 +637,7 @@ void ToolsInsideTraceRecorder::recordTraceCompleted(const QString &clientId,
                                                QStringLiteral("txt"));
 
     ToolsInsideEventRecord event;
+    event.eventId = identity::generateId(identity::IdKind::Event);
     event.traceId = traceId;
     event.spanId = ensureSpanId(requestSpanKey(traceId, requestId));
     event.requestId = requestId;
@@ -643,6 +677,7 @@ void ToolsInsideTraceRecorder::recordTraceError(const QString &clientId,
     }
 
     ToolsInsideEventRecord event;
+    event.eventId = identity::generateId(identity::IdKind::Event);
     event.traceId = traceId;
     event.spanId = ensureSpanId(requestSpanKey(traceId, requestId));
     event.requestId = requestId;
@@ -669,7 +704,7 @@ QString ToolsInsideTraceRecorder::ensureSpanId(const QString &key) const
 {
     QMutexLocker locker(&m_mutex);
     if (!m_spanIdByKey.contains(key)) {
-        m_spanIdByKey.insert(key, QUuid::createUuid().toString(QUuid::WithoutBraces));
+        m_spanIdByKey.insert(key, identity::generateId(identity::IdKind::Span));
     }
     return m_spanIdByKey.value(key);
 }

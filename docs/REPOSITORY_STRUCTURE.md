@@ -54,6 +54,8 @@
   - current phased direction
 - `docs/DECISIONS.md`
   - architectural decisions
+- `docs/IDENTITY_ARCHITECTURE.md`
+  - repository-wide ID model, constraints, and migration plan
 - `docs/developer-guide/`
   - developer-facing guide for `qtllm`
 - `docs/agents/`

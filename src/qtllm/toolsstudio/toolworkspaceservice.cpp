@@ -1,10 +1,9 @@
 #include "toolworkspaceservice.h"
 
+#include "../identity/compactid.h"
 #include "toolworkspacerepository.h"
 
 #include <QDateTime>
-#include <QRegularExpression>
-#include <QUuid>
 
 #include <algorithm>
 
@@ -587,22 +586,18 @@ QSet<QString> ToolWorkspaceService::descendantNodeIds(const QString &nodeId) con
 
 QString ToolWorkspaceService::generateWorkspaceId(const QString &name) const
 {
-    QString value = name.trimmed().toLower();
-    if (value.isEmpty()) {
-        value = QStringLiteral("workspace");
-    }
-    value.replace(QRegularExpression(QStringLiteral("[^a-z0-9_-]")), QStringLiteral("_"));
-    return value + QStringLiteral("_") + QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
+    Q_UNUSED(name)
+    return identity::generateId(identity::IdKind::Workspace);
 }
 
 QString ToolWorkspaceService::generateNodeId() const
 {
-    return QStringLiteral("node_") + QUuid::createUuid().toString(QUuid::WithoutBraces).left(12);
+    return identity::generateId(identity::IdKind::Node);
 }
 
 QString ToolWorkspaceService::generatePlacementId() const
 {
-    return QStringLiteral("plc_") + QUuid::createUuid().toString(QUuid::WithoutBraces).left(12);
+    return identity::generateId(identity::IdKind::Placement);
 }
 
 } // namespace qtllm::toolsstudio

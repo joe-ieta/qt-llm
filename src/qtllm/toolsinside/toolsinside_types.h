@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <QDateTime>
 #include <QJsonObject>
@@ -135,6 +135,7 @@ struct ToolsInsideArtifactRef
 struct ToolsInsideToolCallRecord
 {
     QString toolCallId;
+    QString externalCallId;
     QString traceId;
     QString requestId;
     QString toolId;

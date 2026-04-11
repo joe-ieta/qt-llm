@@ -1,8 +1,7 @@
 #include "conversationclientfactory.h"
 
+#include "../identity/compactid.h"
 #include "../storage/conversationrepository.h"
-
-#include <QUuid>
 
 namespace qtllm::chat {
 
@@ -117,7 +116,7 @@ QSharedPointer<ConversationClient> ConversationClientFactory::createClient(const
 
 QString ConversationClientFactory::generateUid() const
 {
-    return QUuid::createUuid().toString(QUuid::WithoutBraces);
+    return identity::generateId(identity::IdKind::Client);
 }
 
 } // namespace qtllm::chat

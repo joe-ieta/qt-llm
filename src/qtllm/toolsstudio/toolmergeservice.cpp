@@ -1,10 +1,10 @@
 #include "toolmergeservice.h"
 
+#include "../identity/compactid.h"
 #include "toolcatalogservice.h"
 #include "toolworkspaceservice.h"
 
 #include <QHash>
-#include <QUuid>
 
 namespace qtllm::toolsstudio {
 
@@ -12,12 +12,12 @@ namespace {
 
 QString makeNodeId()
 {
-    return QStringLiteral("node_") + QUuid::createUuid().toString(QUuid::WithoutBraces).left(12);
+    return qtllm::identity::generateId(qtllm::identity::IdKind::Node);
 }
 
 QString makePlacementId()
 {
-    return QStringLiteral("plc_") + QUuid::createUuid().toString(QUuid::WithoutBraces).left(12);
+    return qtllm::identity::generateId(qtllm::identity::IdKind::Placement);
 }
 
 bool editableFieldsDiffer(const qtllm::tools::LlmToolDefinition &a, const qtllm::tools::LlmToolDefinition &b)

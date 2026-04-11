@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../identity/compactid.h"
 #include "../core/llmconfig.h"
 #include "../core/llmtypes.h"
 #include "../profile/clientprofile.h"
@@ -175,7 +176,7 @@ struct ConversationSnapshot
         // Backward-compatible fallback for old snapshots that only had a single history array.
         if (snapshot.sessions.isEmpty()) {
             ConversationSessionSnapshot fallback;
-            fallback.sessionId = QStringLiteral("session-1");
+            fallback.sessionId = qtllm::identity::generateId(qtllm::identity::IdKind::Session);
             fallback.title = QStringLiteral("Session 1");
             const QJsonArray historyArray = root.value(QStringLiteral("history")).toArray();
             for (const QJsonValue &value : historyArray) {

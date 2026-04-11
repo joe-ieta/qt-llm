@@ -9,6 +9,7 @@
 #include "../storage/manifestrepository.h"
 #include "../viewer/comparereaderwidget.h"
 
+#include "../../../qtllm/identity/compactid.h"
 #include "../../../qtllm/core/llmtypes.h"
 #include "../../../qtllm/core/qtllmclient.h"
 
@@ -40,7 +41,6 @@
 #include <QTextEdit>
 #include <QTimer>
 #include <QUrl>
-#include <QUuid>
 #include <QVBoxLayout>
 #include <QCloseEvent>
 
@@ -338,7 +338,7 @@ void MainWindow::onExtractPdfClicked()
     }
 
     domain::DocumentTranslationTask task;
-    task.taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    task.taskId = qtllm::identity::generateId(qtllm::identity::IdKind::Task);
     task.sourcePdfPath = pdfPath;
     task.manifestPath = defaultManifestPathForPdf(pdfPath);
     task.transitionTo(domain::DocumentTaskStage::Extracting);

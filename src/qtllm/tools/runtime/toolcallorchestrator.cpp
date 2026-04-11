@@ -1,5 +1,6 @@
 #include "toolcallorchestrator.h"
 
+#include "../../identity/compactid.h"
 #include "../../logging/qtllmlogger.h"
 #include "../../toolsinside/toolsinsideruntime.h"
 #include "../../toolsinside/toolsinsidetracerecorder.h"
@@ -171,11 +172,21 @@ ToolLoopOutcome ToolCallOrchestrator::processToolCalls(const std::shared_ptr<pro
         return outcome;
     }
 
+    QList<ToolCallRequest> executionRequests = requests;
+    for (ToolCallRequest &request : executionRequests) {
+        if (request.externalCallId.trimmed().isEmpty()) {
+            request.externalCallId = request.callId;
+        }
+        if (request.internalToolCallId.trimmed().isEmpty()) {
+            request.internalToolCallId = identity::generateId(identity::IdKind::ToolCall);
+        }
+    }
+
     toolsinside::ToolsInsideRuntime::instance().recorder()->recordToolCallsParsed(context,
                                                                                    context.requestId,
                                                                                    adapter->adapterId(),
                                                                                    currentRound,
-                                                                                   requests);
+                                                                                   executionRequests);
 
     ClientToolPolicy policy;
     policy.clientId = context.clientId;
@@ -191,8 +202,8 @@ ToolLoopOutcome ToolCallOrchestrator::processToolCalls(const std::shared_ptr<pro
     toolsinside::ToolsInsideRuntime::instance().recorder()->recordToolBatchStarted(executionContext,
                                                                                     context.requestId,
                                                                                     currentRound,
-                                                                                    requests.size());
-    const QList<ToolExecutionResult> results = m_executionLayer->executeBatch(requests, executionContext, policy);
+                                                                                    executionRequests.size());
+    const QList<ToolExecutionResult> results = m_executionLayer->executeBatch(executionRequests, executionContext, policy);
     int failureCount = 0;
     for (const ToolExecutionResult &result : results) {
         if (!result.success) {

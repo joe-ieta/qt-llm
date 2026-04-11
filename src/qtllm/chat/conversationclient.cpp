@@ -1,6 +1,7 @@
-﻿#include "conversationclient.h"
+#include "conversationclient.h"
 
 #include "../core/qtllmclient.h"
+#include "../identity/compactid.h"
 #include "../providers/illmprovider.h"
 #include "../tools/runtime/toolcallorchestrator.h"
 #include "../toolsinside/toolsinsideruntime.h"
@@ -168,7 +169,7 @@ QString ConversationClient::activeSessionId() const
 QString ConversationClient::createSession(const QString &title)
 {
     ConversationSessionSnapshot session;
-    session.sessionId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    session.sessionId = identity::generateId(identity::IdKind::Session);
     session.title = title.trimmed().isEmpty() ? defaultSessionTitle(m_sessions.size() + 1) : title.trimmed();
     session.createdAt = QDateTime::currentDateTimeUtc();
     session.updatedAt = session.createdAt;
@@ -270,7 +271,7 @@ void ConversationClient::sendUserMessageWithTools(const QString &content,
     }
 
     const QString resolvedTraceId = traceId.trimmed().isEmpty()
-        ? QUuid::createUuid().toString(QUuid::WithoutBraces)
+        ? identity::generateId(identity::IdKind::Trace)
         : traceId.trimmed();
 
     appendMessage(QStringLiteral("user"), trimmed);
@@ -405,7 +406,7 @@ void ConversationClient::ensureAtLeastOneSession()
     }
 
     ConversationSessionSnapshot session;
-    session.sessionId = QStringLiteral("session-1");
+    session.sessionId = identity::generateId(identity::IdKind::Session);
     session.title = defaultSessionTitle(1);
     session.createdAt = QDateTime::currentDateTimeUtc();
     session.updatedAt = session.createdAt;

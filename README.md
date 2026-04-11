@@ -85,6 +85,23 @@ The repository already includes supporting infrastructure and reference surfaces
 
 This makes the project suitable not only for building LLM functions, but also for understanding, debugging, and improving them over time.
 
+## Identity and ID Rules
+
+The repository now treats ID design as a top-level engineering constraint rather than a local storage detail.
+
+- business and observability IDs should use compact prefixed IDs instead of GUID/UUID strings
+- public interfaces should continue to expose IDs as `QString`
+- internal persistence may be reinitialized when the ID architecture changes
+- new code should use the centralized identity module under `src/qtllm/identity/`
+
+The current canonical prefixes cover core runtime, tracing, ToolStudio, and agent workflow entities such as `cli`, `ses`, `trc`, `req`, `spn`, `evt`, `tcl`, `art`, `lnk`, `wsp`, `nod`, `plc`, `pkg`, `tsk`, and `que`.
+
+Detailed rationale and rules are documented in:
+
+- [docs/IDENTITY_ARCHITECTURE.md](./docs/IDENTITY_ARCHITECTURE.md)
+- [CODING_GUIDELINES.md](./CODING_GUIDELINES.md)
+- [docs/DECISIONS.md](./docs/DECISIONS.md)
+
 ## Typical Usage
 
 Typical usage scenarios include:
@@ -109,8 +126,9 @@ Typical usage scenarios include:
 2. [docs/PROJECT_INTRODUCTION.md](./docs/PROJECT_INTRODUCTION.md)
 3. [docs/REPOSITORY_STRUCTURE.md](./docs/REPOSITORY_STRUCTURE.md)
 4. [docs/ROADMAP.md](./docs/ROADMAP.md)
-5. [docs/developer-guide/README.md](./docs/developer-guide/README.md)
-6. [docs/agents/README.md](./docs/agents/README.md)
+5. [docs/IDENTITY_ARCHITECTURE.md](./docs/IDENTITY_ARCHITECTURE.md)
+6. [docs/developer-guide/README.md](./docs/developer-guide/README.md)
+7. [docs/agents/README.md](./docs/agents/README.md)
 
 ## Code Entry Points
 

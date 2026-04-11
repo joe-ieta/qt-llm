@@ -1,5 +1,6 @@
 #include "toolenabledchatentry.h"
 
+#include "../identity/compactid.h"
 #include "../logging/qtllmlogger.h"
 #include "../toolsinside/toolsinsideruntime.h"
 #include "../toolsinside/toolsinsidetracerecorder.h"
@@ -7,7 +8,6 @@
 #include <QDateTime>
 #include <QJsonArray>
 #include <QJsonDocument>
-#include <QUuid>
 #include <optional>
 
 namespace qtllm::tools {
@@ -84,7 +84,7 @@ void ToolEnabledChatEntry::sendUserMessage(const QString &content)
     }
 
     m_requestId.clear();
-    m_traceId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    m_traceId = identity::generateId(identity::IdKind::Trace);
 
     toolsinside::ToolsInsideRuntime::instance().recorder()->startTrace(m_client->uid(),
                                                                        m_client->activeSessionId(),

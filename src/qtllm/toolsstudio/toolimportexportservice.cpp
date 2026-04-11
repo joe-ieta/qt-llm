@@ -1,10 +1,11 @@
 #include "toolimportexportservice.h"
 
+#include "../identity/compactid.h"
+
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QSaveFile>
-#include <QUuid>
 
 namespace qtllm::toolsstudio {
 
@@ -88,7 +89,7 @@ ToolImportPackage ToolImportExportService::buildPackage(const ToolWorkspaceSnaps
                                                         const QString &exportMode) const
 {
     ToolImportPackage package;
-    package.packageId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    package.packageId = identity::generateId(identity::IdKind::Package);
     package.name = workspace.name.isEmpty() ? workspace.workspaceId : workspace.name;
     package.description = workspace.description;
     package.exportedBy.insert(QStringLiteral("app"), QStringLiteral("toolstudio"));

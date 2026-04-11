@@ -13,6 +13,7 @@ DESTDIR = $$QTLLM_LIB_DIR
 
 INCLUDEPATH += \
     $$PWD \
+    $$PWD/identity \
     $$PWD/core \
     $$PWD/providers \
     $$PWD/network \
@@ -29,6 +30,7 @@ INCLUDEPATH += \
     $$PWD/toolsstudio
 
 HEADERS += \
+    identity/compactid.h \
     core/llmconfig.h \
     core/llmtypes.h \
     core/qtllmclient.h \
@@ -93,6 +95,7 @@ HEADERS += \
     logging/qtllmlogger.h
 
 SOURCES += \
+    identity/compactid.cpp \
     core/qtllmclient.cpp \
     providers/openaiprovider.cpp \
     providers/openaicompatibleprovider.cpp \

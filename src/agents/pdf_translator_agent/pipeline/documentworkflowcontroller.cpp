@@ -4,12 +4,12 @@
 #include "../skills/core/modelrouter.h"
 #include "../skills/core/skillregistry.h"
 #include "../storage/manifestrepository.h"
+#include "../../../qtllm/identity/compactid.h"
 
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
-#include <QUuid>
 
 namespace pdftranslator::pipeline {
 
@@ -59,7 +59,7 @@ DocumentWorkflowRunResult DocumentWorkflowController::runSingleDocumentTranslati
             progressCallback(task);
         }
     };
-    runResult.task.taskId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    runResult.task.taskId = qtllm::identity::generateId(qtllm::identity::IdKind::Task);
     runResult.task.sourcePdfPath = pdfPath;
     runResult.task.manifestPath = manifestPathForPdf(pdfPath);
     runResult.task.extractedTextPath = extractedTextPathForPdf(pdfPath);

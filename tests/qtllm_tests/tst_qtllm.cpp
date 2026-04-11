@@ -13,20 +13,28 @@
 #include <QTextStream>
 #include <QTcpSocket>
 
+#include "tst_qtllm.h"
+
+#include "../../src/qtllm/chat/conversationclient.h"
+#include "../../src/qtllm/chat/conversationclientfactory.h"
 #include "../../src/qtllm/core/llmconfig.h"
 #include "../../src/qtllm/core/llmtypes.h"
+#include "../../src/qtllm/identity/compactid.h"
 #include "../../src/qtllm/logging/filelogsink.h"
 #include "../../src/qtllm/logging/logtypes.h"
 #include "../../src/qtllm/providers/illmprovider.h"
 #include "../../src/qtllm/providers/openaicompatibleprovider.h"
 #include "../../src/qtllm/providers/openaiprovider.h"
 #include "../../src/qtllm/providers/providerfactory.h"
+#include "../../src/qtllm/storage/conversationrepository.h"
 #include "../../src/qtllm/streaming/streamchunkparser.h"
 #include "../../src/qtllm/tools/llmtoolregistry.h"
 #include "../../src/qtllm/tools/mcp/imcpclient.h"
 #include "../../src/qtllm/tools/mcp/mcpserverregistry.h"
 #include "../../src/qtllm/tools/mcp/mcptoolsyncservice.h"
 #include "../../src/qtllm/tools/runtime/toolexecutionlayer.h"
+#include "../../src/qtllm/toolsstudio/toolimportexportservice.h"
+#include "../../src/qtllm/toolsstudio/toolworkspaceservice.h"
 
 using namespace qtllm;
 
@@ -104,39 +112,212 @@ QByteArray makeHttpResponse(const QJsonObject &body)
 
 }
 
-class QtLlmCoreTests : public QObject
+void QtLlmCoreTests::compactIdGeneratesExpectedPrefixes()
 {
-    Q_OBJECT
+    QCOMPARE(identity::prefixForKind(identity::IdKind::Client), QStringLiteral("cli"));
+    QCOMPARE(identity::prefixForKind(identity::IdKind::Session), QStringLiteral("ses"));
+    QCOMPARE(identity::prefixForKind(identity::IdKind::Trace), QStringLiteral("trc"));
+    QCOMPARE(identity::prefixForKind(identity::IdKind::Request), QStringLiteral("req"));
+    QCOMPARE(identity::prefixForKind(identity::IdKind::Span), QStringLiteral("spn"));
+    QCOMPARE(identity::prefixForKind(identity::IdKind::Event), QStringLiteral("evt"));
+    QCOMPARE(identity::prefixForKind(identity::IdKind::ToolCall), QStringLiteral("tcl"));
+    QCOMPARE(identity::prefixForKind(identity::IdKind::Artifact), QStringLiteral("art"));
+    QCOMPARE(identity::prefixForKind(identity::IdKind::SupportLink), QStringLiteral("lnk"));
+    QCOMPARE(identity::prefixForKind(identity::IdKind::Workspace), QStringLiteral("wsp"));
+    QCOMPARE(identity::prefixForKind(identity::IdKind::Node), QStringLiteral("nod"));
+    QCOMPARE(identity::prefixForKind(identity::IdKind::Placement), QStringLiteral("plc"));
+    QCOMPARE(identity::prefixForKind(identity::IdKind::Package), QStringLiteral("pkg"));
+    QCOMPARE(identity::prefixForKind(identity::IdKind::Task), QStringLiteral("tsk"));
+    QCOMPARE(identity::prefixForKind(identity::IdKind::Queue), QStringLiteral("que"));
 
-private slots:
-    void providerFactoryCreatesKnownProviders();
-    void providerFactoryCreatesVendorAliases();
-    void providerFactoryRejectsUnknownProvider();
-    void openAiCompatibleBuildRequestNormalizesPath();
-    void openAiCompatibleBuildRequestAnthropic();
-    void openAiCompatibleBuildRequestGoogle();
-    void openAiCompatibleBuildPayloadProducesJson();
-    void openAiCompatibleBuildPayloadAnthropicTools();
-    void openAiCompatibleParseResponse();
-    void openAiCompatibleParseAnthropicResponse();
-    void openAiCompatibleParseGoogleResponse();
-    void openAiCompatibleParseStreamTokens();
-    void openAiCompatibleParseEventPrefixedSse();
-    void openAiCompatibleParseStreamDeltasReasoningAndToolCalls();
-    void openAiCompatibleParseOllamaJsonLines();
-    void openAiBuildRequestNormalizesResponsesPath();
-    void openAiBuildPayloadSanitizesTools();
-    void openAiParseResponseParsesFunctionCalls();
-    void openAiParseResponseParsesEventPrefixedSse();
-    void openAiParseResponseParsesStreamingFunctionCallEvents();
-    void mcpToolSyncRegistersImportedTools();
-    void toolExecutionLayerExecutesMcpToolByInvocationName();
-    void fileLogSinkRotatesPerClient();
-    void defaultMcpClientReadsToolsOverStdio();
-    void defaultMcpClientCallsToolOverHttpLikeTransport();
-    void streamChunkParserHandlesFragmentedInput();
-    void streamChunkParserTakePendingLine();
-};
+    const QString traceId = identity::generateId(identity::IdKind::Trace);
+    QVERIFY(identity::isValidId(traceId));
+    QVERIFY(identity::hasIdPrefix(traceId, QStringLiteral("trc")));
+
+    const QString customId = identity::generateIdWithPrefix(QStringLiteral("abc"));
+    QVERIFY(identity::isValidId(customId));
+    QVERIFY(identity::hasIdPrefix(customId, QStringLiteral("abc")));
+}
+
+void QtLlmCoreTests::compactIdOrdersMonotonicallyWithinProcess()
+{
+    const QString first = identity::generateId(identity::IdKind::Event);
+    const QString second = identity::generateId(identity::IdKind::Event);
+    const QString third = identity::generateId(identity::IdKind::Event);
+
+    QVERIFY(first < second);
+    QVERIFY(second < third);
+
+    bool firstOk = false;
+    bool secondOk = false;
+    bool thirdOk = false;
+    const quint64 firstOrder = identity::decodeIdOrder(first, &firstOk);
+    const quint64 secondOrder = identity::decodeIdOrder(second, &secondOk);
+    const quint64 thirdOrder = identity::decodeIdOrder(third, &thirdOk);
+    QVERIFY(firstOk);
+    QVERIFY(secondOk);
+    QVERIFY(thirdOk);
+    QVERIFY(firstOrder < secondOrder);
+    QVERIFY(secondOrder < thirdOrder);
+}
+
+void QtLlmCoreTests::compactIdValidatesAndDecodes()
+{
+    const quint64 orderValue = 0x123456789ABCDULL;
+    const QString composed = identity::composeId(QStringLiteral("req"), orderValue);
+    QCOMPARE(composed, QStringLiteral("req_000938NKRKAYD"));
+    QVERIFY(identity::isValidId(composed));
+    QVERIFY(identity::hasIdPrefix(composed, QStringLiteral("req")));
+
+    bool ok = false;
+    QCOMPARE(identity::decodeIdOrder(composed, &ok), orderValue);
+    QVERIFY(ok);
+
+    const QString ambiguous = QStringLiteral("req_04HMASW9NF6YD");
+    QCOMPARE(identity::decodeIdOrder(ambiguous, &ok), orderValue);
+    QVERIFY(ok);
+
+    const QString ambiguousLetters = QStringLiteral("req_04HMASW9NF6Yi");
+    QCOMPARE(identity::decodeIdOrder(ambiguousLetters, &ok), orderValue);
+    QVERIFY(ok);
+}
+
+void QtLlmCoreTests::compactIdRejectsMalformedValues()
+{
+    bool ok = true;
+    QVERIFY(identity::composeId(QStringLiteral("Bad"), 1).isEmpty());
+    QVERIFY(identity::generateIdWithPrefix(QStringLiteral("bad-prefix")).isEmpty());
+    QVERIFY(!identity::isValidId(QStringLiteral("")));
+    QVERIFY(!identity::isValidId(QStringLiteral("req")));
+    QVERIFY(!identity::isValidId(QStringLiteral("REQ_0123456789ABC")));
+    QVERIFY(!identity::isValidId(QStringLiteral("req_0123456789AB")));
+    QVERIFY(!identity::isValidId(QStringLiteral("req_0123456789ABC!")));
+    QVERIFY(!identity::hasIdPrefix(QStringLiteral("req_0123456789ABU"), QStringLiteral("req")));
+    QCOMPARE(identity::decodeIdOrder(QStringLiteral("req_0123456789ABC!"), &ok), 0ULL);
+    QVERIFY(!ok);
+}
+
+void QtLlmCoreTests::conversationClientFactoryGeneratesCompactClientIds()
+{
+    chat::ConversationClientFactory factory;
+
+    const QSharedPointer<chat::ConversationClient> client = factory.acquire();
+    QVERIFY(client);
+    QVERIFY(identity::isValidId(client->uid()));
+    QVERIFY(identity::hasIdPrefix(client->uid(), QStringLiteral("cli")));
+    QCOMPARE(factory.find(client->uid()), client);
+}
+
+void QtLlmCoreTests::conversationClientGeneratesCompactSessionIds()
+{
+    chat::ConversationClient client(QStringLiteral("cli_testclient0001"));
+
+    QVERIFY(identity::isValidId(client.activeSessionId()));
+    QVERIFY(identity::hasIdPrefix(client.activeSessionId(), QStringLiteral("ses")));
+
+    const QString newSessionId = client.createSession(QStringLiteral("Follow-up"));
+    QVERIFY(identity::isValidId(newSessionId));
+    QVERIFY(identity::hasIdPrefix(newSessionId, QStringLiteral("ses")));
+    QCOMPARE(client.activeSessionId(), newSessionId);
+    QVERIFY(client.sessionIds().contains(newSessionId));
+}
+
+void QtLlmCoreTests::conversationRepositoryPersistsCompactConversationIds()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+
+    auto repository = std::make_shared<storage::ConversationRepository>(tempDir.path());
+    chat::ConversationClientFactory factory;
+    factory.setRepository(repository);
+
+    const QSharedPointer<chat::ConversationClient> client = factory.acquire();
+    QVERIFY(client);
+    const QString sessionId = client->activeSessionId();
+
+    QString errorMessage;
+    QVERIFY(factory.saveClient(client->uid(), &errorMessage));
+    QVERIFY2(errorMessage.isEmpty(), qPrintable(errorMessage));
+
+    const QStringList persistedIds = repository->listClientIds();
+    QVERIFY(persistedIds.contains(client->uid()));
+
+    const std::optional<chat::ConversationSnapshot> snapshot = repository->loadSnapshot(client->uid(), &errorMessage);
+    QVERIFY2(snapshot.has_value(), qPrintable(errorMessage));
+    QCOMPARE(snapshot->uid, client->uid());
+    QCOMPARE(snapshot->activeSessionId, sessionId);
+    QVERIFY(identity::hasIdPrefix(snapshot->uid, QStringLiteral("cli")));
+    QVERIFY(identity::hasIdPrefix(snapshot->activeSessionId, QStringLiteral("ses")));
+}
+
+void QtLlmCoreTests::toolStudioGeneratesCompactWorkspaceNodeAndPlacementIds()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+
+    auto repository = std::make_shared<toolsstudio::ToolWorkspaceRepository>(tempDir.path());
+    toolsstudio::ToolWorkspaceService service(repository);
+
+    QString errorMessage;
+    QVERIFY(service.initialize(QString(), &errorMessage));
+    QVERIFY2(errorMessage.isEmpty(), qPrintable(errorMessage));
+
+    QString workspaceId;
+    QVERIFY(service.createWorkspace(QStringLiteral("My Workspace"), &workspaceId, &errorMessage));
+    QVERIFY2(errorMessage.isEmpty(), qPrintable(errorMessage));
+    QVERIFY(identity::isValidId(workspaceId));
+    QVERIFY(identity::hasIdPrefix(workspaceId, QStringLiteral("wsp")));
+    QCOMPARE(service.currentWorkspaceId(), workspaceId);
+
+    const toolsstudio::ToolWorkspaceSnapshot workspace = service.currentWorkspace();
+    QCOMPARE(workspace.rootNodeId, QStringLiteral("root"));
+
+    QString nodeId;
+    QVERIFY(service.createNode(workspace.rootNodeId, QStringLiteral("Utilities"), &nodeId, &errorMessage));
+    QVERIFY2(errorMessage.isEmpty(), qPrintable(errorMessage));
+    QVERIFY(identity::isValidId(nodeId));
+    QVERIFY(identity::hasIdPrefix(nodeId, QStringLiteral("nod")));
+
+    QString placementId;
+    QVERIFY(service.addToolToNode(nodeId, QStringLiteral("tool.echo"), &placementId, &errorMessage));
+    QVERIFY2(errorMessage.isEmpty(), qPrintable(errorMessage));
+    QVERIFY(identity::isValidId(placementId));
+    QVERIFY(identity::hasIdPrefix(placementId, QStringLiteral("plc")));
+}
+
+void QtLlmCoreTests::toolStudioExportPackageUsesCompactPackageId()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+
+    toolsstudio::ToolWorkspaceSnapshot workspace;
+    workspace.workspaceId = identity::generateId(identity::IdKind::Workspace);
+    workspace.name = QStringLiteral("Workspace Export");
+
+    toolsstudio::ToolCategoryNode node;
+    node.nodeId = identity::generateId(identity::IdKind::Node);
+    node.parentNodeId = workspace.rootNodeId;
+    node.name = QStringLiteral("Imported");
+    workspace.nodes.append(node);
+
+    toolsstudio::ToolPlacement placement;
+    placement.placementId = identity::generateId(identity::IdKind::Placement);
+    placement.nodeId = node.nodeId;
+    placement.toolId = QStringLiteral("tool.echo");
+    workspace.placements.append(placement);
+
+    const QString packagePath = tempDir.filePath(QStringLiteral("workspace-export.json"));
+    toolsstudio::ToolImportExportService service;
+    QString errorMessage;
+    QVERIFY(service.exportWorkspace(workspace, {}, packagePath, false, &errorMessage));
+    QVERIFY2(errorMessage.isEmpty(), qPrintable(errorMessage));
+
+    const std::optional<toolsstudio::ToolImportPackage> package = service.loadPackage(packagePath, &errorMessage);
+    QVERIFY2(package.has_value(), qPrintable(errorMessage));
+    QVERIFY(identity::isValidId(package->packageId));
+    QVERIFY(identity::hasIdPrefix(package->packageId, QStringLiteral("pkg")));
+    QCOMPARE(package->workspace.workspaceId, workspace.workspaceId);
+}
 
 void QtLlmCoreTests::providerFactoryCreatesKnownProviders()
 {
@@ -806,4 +987,3 @@ int main(int argc, char *argv[])
     QtLlmCoreTests tc;
     return QTest::qExec(&tc, argc, argv);
 }
-#include "tst_qtllm.moc"

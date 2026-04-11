@@ -43,6 +43,8 @@ struct ToolExecutionContext
 struct ToolCallRequest
 {
     QString callId;
+    QString externalCallId;
+    QString internalToolCallId;
     QString toolId;
     QJsonObject arguments;
     QString idempotencyKey;
@@ -51,6 +53,8 @@ struct ToolCallRequest
 struct ToolExecutionResult
 {
     QString callId;
+    QString externalCallId;
+    QString internalToolCallId;
     QString toolId;
     bool success = false;
     QJsonObject output;

@@ -1,11 +1,11 @@
-﻿#include "toolsinsideartifactstore.h"
+#include "toolsinsideartifactstore.h"
 #include "toolsinsidei18n.h"
+#include "../identity/compactid.h"
 
 #include <QCryptographicHash>
 #include <QDir>
 #include <QRegularExpression>
 #include <QSaveFile>
-#include <QUuid>
 
 namespace qtllm::toolsinside {
 
@@ -54,7 +54,7 @@ ToolsInsideArtifactRef ToolsInsideArtifactStore::writeArtifact(const QString &cl
                                                                QString *errorMessage) const
 {
     ToolsInsideArtifactRef artifact;
-    artifact.artifactId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    artifact.artifactId = identity::generateId(identity::IdKind::Artifact);
     artifact.clientId = clientId.trimmed();
     artifact.sessionId = sessionId.trimmed();
     artifact.traceId = traceId.trimmed();

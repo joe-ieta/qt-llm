@@ -199,7 +199,10 @@ bool ToolsInsideRepository::upsertSpan(const ToolsInsideSpanRecord &span, QStrin
 {
     ToolsInsideSpanRecord stored = span;
     if (stored.spanId.trimmed().isEmpty()) {
-        stored.spanId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("ToolsInsideSpanRecord.spanId must not be empty");
+        }
+        return false;
     }
     QMutexLocker locker(&m_mutex);
     if (!ensureConnectionLocked(errorMessage) || !runMigrationsLocked(errorMessage)) {
@@ -234,7 +237,10 @@ bool ToolsInsideRepository::upsertEvent(const ToolsInsideEventRecord &event, QSt
 {
     ToolsInsideEventRecord stored = event;
     if (stored.eventId.trimmed().isEmpty()) {
-        stored.eventId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("ToolsInsideEventRecord.eventId must not be empty");
+        }
+        return false;
     }
     QMutexLocker locker(&m_mutex);
     if (!ensureConnectionLocked(errorMessage) || !runMigrationsLocked(errorMessage)) {
@@ -297,7 +303,10 @@ bool ToolsInsideRepository::upsertToolCall(const ToolsInsideToolCallRecord &tool
 {
     ToolsInsideToolCallRecord stored = toolCall;
     if (stored.toolCallId.trimmed().isEmpty()) {
-        stored.toolCallId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("ToolsInsideToolCallRecord.toolCallId must not be empty");
+        }
+        return false;
     }
     QMutexLocker locker(&m_mutex);
     if (!ensureConnectionLocked(errorMessage) || !runMigrationsLocked(errorMessage)) {
@@ -306,12 +315,12 @@ bool ToolsInsideRepository::upsertToolCall(const ToolsInsideToolCallRecord &tool
 
     QSqlQuery query(QSqlDatabase::database(m_connectionName));
     query.prepare(QStringLiteral(
-        "INSERT INTO ti_tool_calls (tool_call_id, trace_id, request_id, tool_id, tool_name, tool_category, server_id, invocation_name, "
+        "INSERT INTO ti_tool_calls (tool_call_id, external_call_id, trace_id, request_id, tool_id, tool_name, tool_category, server_id, invocation_name, "
         "arguments_artifact_id, output_artifact_id, followup_artifact_id, status, error_code, error_message, retryable, round_index, "
         "duration_ms, started_at_utc, ended_at_utc, summary_json) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(tool_call_id) DO UPDATE SET "
-        "trace_id = excluded.trace_id, request_id = excluded.request_id, tool_id = excluded.tool_id, tool_name = excluded.tool_name, "
+        "external_call_id = excluded.external_call_id, trace_id = excluded.trace_id, request_id = excluded.request_id, tool_id = excluded.tool_id, tool_name = excluded.tool_name, "
         "tool_category = excluded.tool_category, server_id = excluded.server_id, invocation_name = excluded.invocation_name, "
         "arguments_artifact_id = CASE WHEN excluded.arguments_artifact_id = '' THEN ti_tool_calls.arguments_artifact_id ELSE excluded.arguments_artifact_id END, "
         "output_artifact_id = CASE WHEN excluded.output_artifact_id = '' THEN ti_tool_calls.output_artifact_id ELSE excluded.output_artifact_id END, "
@@ -320,6 +329,7 @@ bool ToolsInsideRepository::upsertToolCall(const ToolsInsideToolCallRecord &tool
         "round_index = excluded.round_index, duration_ms = excluded.duration_ms, started_at_utc = excluded.started_at_utc, "
         "ended_at_utc = excluded.ended_at_utc, summary_json = excluded.summary_json"));
     query.addBindValue(stored.toolCallId);
+    query.addBindValue(stored.externalCallId);
     query.addBindValue(stored.traceId);
     query.addBindValue(stored.requestId);
     query.addBindValue(stored.toolId);
@@ -346,7 +356,10 @@ bool ToolsInsideRepository::upsertSupportLink(const ToolsInsideSupportLink &supp
 {
     ToolsInsideSupportLink stored = supportLink;
     if (stored.supportLinkId.trimmed().isEmpty()) {
-        stored.supportLinkId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("ToolsInsideSupportLink.supportLinkId must not be empty");
+        }
+        return false;
     }
     QMutexLocker locker(&m_mutex);
     if (!ensureConnectionLocked(errorMessage) || !runMigrationsLocked(errorMessage)) {
@@ -729,7 +742,7 @@ QList<ToolsInsideToolCallRecord> ToolsInsideRepository::listToolCalls(const QStr
 
     QSqlQuery query(QSqlDatabase::database(m_connectionName));
     query.prepare(QStringLiteral(
-        "SELECT tool_call_id, trace_id, request_id, tool_id, tool_name, tool_category, server_id, invocation_name, "
+        "SELECT tool_call_id, external_call_id, trace_id, request_id, tool_id, tool_name, tool_category, server_id, invocation_name, "
         "arguments_artifact_id, output_artifact_id, followup_artifact_id, status, error_code, error_message, retryable, round_index, "
         "duration_ms, started_at_utc, ended_at_utc, summary_json FROM ti_tool_calls WHERE trace_id = ? ORDER BY started_at_utc ASC"));
     query.addBindValue(traceId);
@@ -740,25 +753,26 @@ QList<ToolsInsideToolCallRecord> ToolsInsideRepository::listToolCalls(const QStr
     while (query.next()) {
         ToolsInsideToolCallRecord record;
         record.toolCallId = query.value(0).toString();
-        record.traceId = query.value(1).toString();
-        record.requestId = query.value(2).toString();
-        record.toolId = query.value(3).toString();
-        record.toolName = query.value(4).toString();
-        record.toolCategory = query.value(5).toString();
-        record.serverId = query.value(6).toString();
-        record.invocationName = query.value(7).toString();
-        record.argumentsArtifactId = query.value(8).toString();
-        record.outputArtifactId = query.value(9).toString();
-        record.followupArtifactId = query.value(10).toString();
-        record.status = query.value(11).toString();
-        record.errorCode = query.value(12).toString();
-        record.errorMessage = query.value(13).toString();
-        record.retryable = query.value(14).toInt() != 0;
-        record.roundIndex = query.value(15).toInt();
-        record.durationMs = query.value(16).toLongLong();
-        record.startedAtUtc = fromIsoDate(query.value(17));
-        record.endedAtUtc = fromIsoDate(query.value(18));
-        record.summary = parseJsonObject(query.value(19));
+        record.externalCallId = query.value(1).toString();
+        record.traceId = query.value(2).toString();
+        record.requestId = query.value(3).toString();
+        record.toolId = query.value(4).toString();
+        record.toolName = query.value(5).toString();
+        record.toolCategory = query.value(6).toString();
+        record.serverId = query.value(7).toString();
+        record.invocationName = query.value(8).toString();
+        record.argumentsArtifactId = query.value(9).toString();
+        record.outputArtifactId = query.value(10).toString();
+        record.followupArtifactId = query.value(11).toString();
+        record.status = query.value(12).toString();
+        record.errorCode = query.value(13).toString();
+        record.errorMessage = query.value(14).toString();
+        record.retryable = query.value(15).toInt() != 0;
+        record.roundIndex = query.value(16).toInt();
+        record.durationMs = query.value(17).toLongLong();
+        record.startedAtUtc = fromIsoDate(query.value(18));
+        record.endedAtUtc = fromIsoDate(query.value(19));
+        record.summary = parseJsonObject(query.value(20));
         toolCalls.append(record);
     }
     return toolCalls;
@@ -832,12 +846,50 @@ bool ToolsInsideRepository::ensureConnectionLocked(QString *errorMessage) const
 
 bool ToolsInsideRepository::runMigrationsLocked(QString *errorMessage) const
 {
+    constexpr int kSchemaVersion = 2;
+
+    {
+        QSqlQuery versionQuery(QSqlDatabase::database(m_connectionName));
+        if (!versionQuery.exec(QStringLiteral("PRAGMA user_version"))) {
+            if (errorMessage) {
+                *errorMessage = versionQuery.lastError().text();
+            }
+            return false;
+        }
+
+        int currentVersion = 0;
+        if (versionQuery.next()) {
+            currentVersion = versionQuery.value(0).toInt();
+        }
+
+        if (currentVersion != 0 && currentVersion != kSchemaVersion) {
+            const QStringList resetStatements = {
+                QStringLiteral("DROP TABLE IF EXISTS ti_support_links"),
+                QStringLiteral("DROP TABLE IF EXISTS ti_tool_calls"),
+                QStringLiteral("DROP TABLE IF EXISTS ti_events"),
+                QStringLiteral("DROP TABLE IF EXISTS ti_spans"),
+                QStringLiteral("DROP TABLE IF EXISTS ti_artifacts"),
+                QStringLiteral("DROP TABLE IF EXISTS ti_traces")
+            };
+
+            for (const QString &statement : resetStatements) {
+                QSqlQuery resetQuery(QSqlDatabase::database(m_connectionName));
+                if (!resetQuery.exec(statement)) {
+                    if (errorMessage) {
+                        *errorMessage = resetQuery.lastError().text();
+                    }
+                    return false;
+                }
+            }
+        }
+    }
+
     const QStringList statements = {
         QStringLiteral("CREATE TABLE IF NOT EXISTS ti_traces (trace_id TEXT PRIMARY KEY, client_id TEXT NOT NULL, session_id TEXT NOT NULL, root_request_id TEXT, status TEXT, model TEXT, provider TEXT, vendor TEXT, started_at_utc TEXT, ended_at_utc TEXT, final_answer_artifact_id TEXT, turn_input_preview TEXT, summary_json TEXT)"),
         QStringLiteral("CREATE TABLE IF NOT EXISTS ti_spans (span_id TEXT PRIMARY KEY, trace_id TEXT NOT NULL, parent_span_id TEXT, request_id TEXT, tool_call_id TEXT, kind TEXT NOT NULL, name TEXT NOT NULL, status TEXT, error_code TEXT, started_at_utc TEXT, ended_at_utc TEXT, summary_json TEXT)"),
         QStringLiteral("CREATE TABLE IF NOT EXISTS ti_events (event_id TEXT PRIMARY KEY, trace_id TEXT NOT NULL, span_id TEXT, request_id TEXT, tool_call_id TEXT, category TEXT NOT NULL, name TEXT NOT NULL, timestamp_utc TEXT NOT NULL, payload_json TEXT)"),
         QStringLiteral("CREATE TABLE IF NOT EXISTS ti_artifacts (artifact_id TEXT PRIMARY KEY, trace_id TEXT NOT NULL, client_id TEXT NOT NULL, session_id TEXT NOT NULL, kind TEXT NOT NULL, mime_type TEXT, storage_type TEXT, relative_path TEXT NOT NULL, redaction_state TEXT, sha256 TEXT, size_bytes INTEGER, created_at_utc TEXT, metadata_json TEXT)"),
-        QStringLiteral("CREATE TABLE IF NOT EXISTS ti_tool_calls (tool_call_id TEXT PRIMARY KEY, trace_id TEXT NOT NULL, request_id TEXT, tool_id TEXT, tool_name TEXT, tool_category TEXT, server_id TEXT, invocation_name TEXT, arguments_artifact_id TEXT, output_artifact_id TEXT, followup_artifact_id TEXT, status TEXT, error_code TEXT, error_message TEXT, retryable INTEGER, round_index INTEGER, duration_ms INTEGER, started_at_utc TEXT, ended_at_utc TEXT, summary_json TEXT)"),
+        QStringLiteral("CREATE TABLE IF NOT EXISTS ti_tool_calls (tool_call_id TEXT PRIMARY KEY, external_call_id TEXT, trace_id TEXT NOT NULL, request_id TEXT, tool_id TEXT, tool_name TEXT, tool_category TEXT, server_id TEXT, invocation_name TEXT, arguments_artifact_id TEXT, output_artifact_id TEXT, followup_artifact_id TEXT, status TEXT, error_code TEXT, error_message TEXT, retryable INTEGER, round_index INTEGER, duration_ms INTEGER, started_at_utc TEXT, ended_at_utc TEXT, summary_json TEXT)"),
         QStringLiteral("CREATE TABLE IF NOT EXISTS ti_support_links (support_link_id TEXT PRIMARY KEY, trace_id TEXT NOT NULL, tool_call_id TEXT NOT NULL, target_kind TEXT NOT NULL, target_id TEXT NOT NULL, support_type TEXT NOT NULL, source TEXT, evidence_artifact_id TEXT, note TEXT, confidence REAL, created_at_utc TEXT, metadata_json TEXT)")
     };
 
@@ -849,6 +901,14 @@ bool ToolsInsideRepository::runMigrationsLocked(QString *errorMessage) const
             }
             return false;
         }
+    }
+
+    QSqlQuery versionUpdate(QSqlDatabase::database(m_connectionName));
+    if (!versionUpdate.exec(QStringLiteral("PRAGMA user_version = 2"))) {
+        if (errorMessage) {
+            *errorMessage = versionUpdate.lastError().text();
+        }
+        return false;
     }
     return true;
 }

@@ -3,8 +3,12 @@ TARGET = qtllm_tests
 CONFIG += c++17 testcase console warn_on link_prl
 QT += core network sql testlib
 
+HEADERS += \
+    tst_qtllm.h
+
 INCLUDEPATH += \
     ../../src/qtllm \
+    ../../src/qtllm/identity \
     ../../src/qtllm/core \
     ../../src/qtllm/providers \
     ../../src/qtllm/network \

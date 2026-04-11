@@ -55,3 +55,11 @@ When adding a new class, include:
 - its main responsibility
 
 When changing architecture, update the markdown docs as part of the same change.
+
+## Identity rules
+
+- Repository-owned IDs must come from the shared identity module under `src/qtllm/`.
+- Do not call `QUuid::createUuid()` directly in domain logic for client, session, trace, request, span, event, tool-call, artifact, workspace, task, or similar persisted IDs.
+- Keep public `qtllm` interfaces source-compatible unless an explicit architecture decision says otherwise.
+- Existing public ID-bearing APIs should remain `QString`-based even if internal generation semantics change.
+- If a change introduces a new internal ID type or prefix, update [docs/IDENTITY_ARCHITECTURE.md](./docs/IDENTITY_ARCHITECTURE.md) in the same change.

@@ -1,10 +1,11 @@
-﻿#include "toolsinsidebrowser.h"
+#include "toolsinsidebrowser.h"
 
 #include "../../qtllm/toolsinside/toolsinsideadminservice.h"
 #include "../../qtllm/toolsinside/toolsinsideartifactstore.h"
 #include "../../qtllm/toolsinside/toolsinsidei18n.h"
 #include "../../qtllm/toolsinside/toolsinsidequeryservice.h"
 #include "../../qtllm/toolsinside/toolsinsideruntime.h"
+#include "../../qtllm/identity/compactid.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -59,6 +60,9 @@ QString joinSections(const QStringList &sections)
 QString shortId(const QString &value)
 {
     const QString trimmed = value.trimmed();
+    if (qtllm::identity::isValidId(trimmed)) {
+        return trimmed;
+    }
     if (trimmed.size() <= 12) {
         return trimmed;
     }
@@ -155,6 +159,7 @@ QVariantMap toMap(const ToolsInsideToolCallRecord &toolCall)
 {
     return {
         {QStringLiteral("toolCallId"), toolCall.toolCallId},
+        {QStringLiteral("externalCallId"), toolCall.externalCallId},
         {QStringLiteral("requestId"), toolCall.requestId},
         {QStringLiteral("toolId"), toolCall.toolId},
         {QStringLiteral("toolName"), toolCall.toolName},

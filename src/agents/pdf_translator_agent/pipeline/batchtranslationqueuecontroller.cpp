@@ -1,12 +1,12 @@
 #include "batchtranslationqueuecontroller.h"
 
 #include "documentworkflowcontroller.h"
+#include "../../../qtllm/identity/compactid.h"
 
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QThread>
-#include <QUuid>
 
 namespace pdftranslator::pipeline {
 
@@ -85,9 +85,9 @@ void BatchTranslationQueueController::enqueueDocuments(const QStringList &pdfPat
         }
 
         BatchQueueEntry entry;
-        entry.queueId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        entry.queueId = qtllm::identity::generateId(qtllm::identity::IdKind::Queue);
         entry.pdfPath = path.trimmed();
-        entry.task.taskId = entry.queueId;
+        entry.task.taskId = qtllm::identity::generateId(qtllm::identity::IdKind::Task);
         entry.task.sourcePdfPath = entry.pdfPath;
         entry.task.transitionTo(domain::DocumentTaskStage::Queued);
         entry.task.progress = 0;

@@ -130,6 +130,8 @@ ToolExecutionResult ToolExecutionLayer::executeSingle(const ToolCallRequest &req
 
     ToolExecutionResult result;
     result.callId = request.callId;
+    result.externalCallId = request.externalCallId.trimmed().isEmpty() ? request.callId : request.externalCallId;
+    result.internalToolCallId = request.internalToolCallId;
     result.toolId = resolvedToolId;
 
     ToolCallRequest resolvedRequest = request;
@@ -142,6 +144,14 @@ ToolExecutionResult ToolExecutionLayer::executeSingle(const ToolCallRequest &req
     auto finalizeResult = [&](ToolExecutionResult out) {
         if (out.callId.isEmpty()) {
             out.callId = resolvedRequest.callId;
+        }
+        if (out.externalCallId.isEmpty()) {
+            out.externalCallId = resolvedRequest.externalCallId.trimmed().isEmpty()
+                ? resolvedRequest.callId
+                : resolvedRequest.externalCallId;
+        }
+        if (out.internalToolCallId.isEmpty()) {
+            out.internalToolCallId = resolvedRequest.internalToolCallId;
         }
         if (out.toolId.isEmpty()) {
             out.toolId = resolvedRequest.toolId;
@@ -223,6 +233,14 @@ ToolExecutionResult ToolExecutionLayer::executeSingle(const ToolCallRequest &req
     if (executed.callId.isEmpty()) {
         executed.callId = resolvedRequest.callId;
     }
+    if (executed.externalCallId.isEmpty()) {
+        executed.externalCallId = resolvedRequest.externalCallId.trimmed().isEmpty()
+            ? resolvedRequest.callId
+            : resolvedRequest.externalCallId;
+    }
+    if (executed.internalToolCallId.isEmpty()) {
+        executed.internalToolCallId = resolvedRequest.internalToolCallId;
+    }
     if (executed.toolId.isEmpty()) {
         executed.toolId = resolvedRequest.toolId;
     }
@@ -250,6 +268,8 @@ ToolExecutionResult ToolExecutionLayer::executeMcpTool(const ToolCallRequest &re
 {
     ToolExecutionResult result;
     result.callId = request.callId;
+    result.externalCallId = request.externalCallId.trimmed().isEmpty() ? request.callId : request.externalCallId;
+    result.internalToolCallId = request.internalToolCallId;
     result.toolId = request.toolId;
 
     const QStringList parts = request.toolId.split(QStringLiteral("::"));
