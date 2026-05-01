@@ -14,7 +14,7 @@ bool ToolExecutorRegistry::registerExecutor(const std::shared_ptr<IToolExecutor>
 
 bool ToolExecutorRegistry::unregisterExecutor(const QString &toolId)
 {
-    return m_executors.remove(toolId.trimmed()) > 0;
+    return m_executors.remove(toolId.trimmed());
 }
 
 std::shared_ptr<IToolExecutor> ToolExecutorRegistry::find(const QString &toolId) const

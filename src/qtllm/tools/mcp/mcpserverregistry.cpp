@@ -142,7 +142,7 @@ bool McpServerRegistry::removeServer(const QString &serverId, QString *errorMess
         return false;
     }
 
-    if (m_servers.remove(id) <= 0) {
+    if (m_servers.remove(id)) {
         if (errorMessage) {
             *errorMessage = QStringLiteral("MCP server does not exist: ") + id;
         }

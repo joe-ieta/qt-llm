@@ -4,9 +4,11 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QMutexLocker>
+#include <QCoreApplication>
 #include <QSqlDatabase>
 #include <QSqlError>
 #include <QSqlQuery>
+#include <QThread>
 #include <QUuid>
 
 namespace qtllm::toolsinside {
@@ -16,6 +18,12 @@ namespace {
 QString toJsonText(const QJsonObject &object)
 {
     return object.isEmpty() ? QString() : QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact));
+}
+
+QString threadConnectionName(const QString &baseConnectionName)
+{
+    return QStringLiteral("%1_%2").arg(baseConnectionName,
+                                      QString::number(reinterpret_cast<quintptr>(QThread::currentThreadId()), 16));
 }
 
 QJsonObject parseJsonObject(const QVariant &value)
@@ -94,14 +102,19 @@ ToolsInsideRepository::ToolsInsideRepository(QString databasePath)
 
 ToolsInsideRepository::~ToolsInsideRepository()
 {
+    if (QCoreApplication::instance() == nullptr) {
+        return;
+    }
+
     QMutexLocker locker(&m_mutex);
-    if (QSqlDatabase::contains(m_connectionName)) {
-        QSqlDatabase database = QSqlDatabase::database(m_connectionName);
+    const QString connectionName = threadConnectionName(m_connectionName);
+    if (QSqlDatabase::contains(connectionName)) {
+        QSqlDatabase database = QSqlDatabase::database(connectionName);
         if (database.isOpen()) {
             database.close();
         }
     }
-    QSqlDatabase::removeDatabase(m_connectionName);
+    QSqlDatabase::removeDatabase(connectionName);
 }
 
 void ToolsInsideRepository::setDatabasePath(const QString &databasePath)
@@ -110,12 +123,13 @@ void ToolsInsideRepository::setDatabasePath(const QString &databasePath)
     m_databasePath = databasePath.trimmed().isEmpty()
         ? QStringLiteral(".qtllm/tools_inside/index.db")
         : databasePath.trimmed();
-    if (QSqlDatabase::contains(m_connectionName)) {
-        QSqlDatabase database = QSqlDatabase::database(m_connectionName);
+    const QString connectionName = threadConnectionName(m_connectionName);
+    if (QSqlDatabase::contains(connectionName)) {
+        QSqlDatabase database = QSqlDatabase::database(connectionName);
         if (database.isOpen()) {
             database.close();
         }
-        QSqlDatabase::removeDatabase(m_connectionName);
+        QSqlDatabase::removeDatabase(connectionName);
     }
 }
 
@@ -137,7 +151,7 @@ bool ToolsInsideRepository::upsertTrace(const ToolsInsideTraceSummary &trace, QS
         return false;
     }
 
-    QSqlQuery query(QSqlDatabase::database(m_connectionName));
+    QSqlQuery query(QSqlDatabase::database(threadConnectionName(m_connectionName)));
     query.prepare(QStringLiteral(
         "INSERT INTO ti_traces (trace_id, client_id, session_id, root_request_id, status, model, provider, vendor, "
         "started_at_utc, ended_at_utc, final_answer_artifact_id, turn_input_preview, summary_json) "
@@ -182,7 +196,7 @@ bool ToolsInsideRepository::finishTrace(const QString &traceId,
         return false;
     }
 
-    QSqlQuery query(QSqlDatabase::database(m_connectionName));
+    QSqlQuery query(QSqlDatabase::database(threadConnectionName(m_connectionName)));
     query.prepare(QStringLiteral(
         "UPDATE ti_traces SET status = ?, ended_at_utc = ?, "
         "final_answer_artifact_id = CASE WHEN ? = '' THEN final_answer_artifact_id ELSE ? END "
@@ -209,7 +223,7 @@ bool ToolsInsideRepository::upsertSpan(const ToolsInsideSpanRecord &span, QStrin
         return false;
     }
 
-    QSqlQuery query(QSqlDatabase::database(m_connectionName));
+    QSqlQuery query(QSqlDatabase::database(threadConnectionName(m_connectionName)));
     query.prepare(QStringLiteral(
         "INSERT INTO ti_spans (span_id, trace_id, parent_span_id, request_id, tool_call_id, kind, name, status, error_code, "
         "started_at_utc, ended_at_utc, summary_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
@@ -247,7 +261,7 @@ bool ToolsInsideRepository::upsertEvent(const ToolsInsideEventRecord &event, QSt
         return false;
     }
 
-    QSqlQuery query(QSqlDatabase::database(m_connectionName));
+    QSqlQuery query(QSqlDatabase::database(threadConnectionName(m_connectionName)));
     query.prepare(QStringLiteral(
         "INSERT INTO ti_events (event_id, trace_id, span_id, request_id, tool_call_id, category, name, timestamp_utc, payload_json) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
@@ -273,7 +287,7 @@ bool ToolsInsideRepository::upsertArtifact(const ToolsInsideArtifactRef &artifac
         return false;
     }
 
-    QSqlQuery query(QSqlDatabase::database(m_connectionName));
+    QSqlQuery query(QSqlDatabase::database(threadConnectionName(m_connectionName)));
     query.prepare(QStringLiteral(
         "INSERT INTO ti_artifacts (artifact_id, trace_id, client_id, session_id, kind, mime_type, storage_type, relative_path, "
         "redaction_state, sha256, size_bytes, created_at_utc, metadata_json) "
@@ -313,7 +327,7 @@ bool ToolsInsideRepository::upsertToolCall(const ToolsInsideToolCallRecord &tool
         return false;
     }
 
-    QSqlQuery query(QSqlDatabase::database(m_connectionName));
+    QSqlQuery query(QSqlDatabase::database(threadConnectionName(m_connectionName)));
     query.prepare(QStringLiteral(
         "INSERT INTO ti_tool_calls (tool_call_id, external_call_id, trace_id, request_id, tool_id, tool_name, tool_category, server_id, invocation_name, "
         "arguments_artifact_id, output_artifact_id, followup_artifact_id, status, error_code, error_message, retryable, round_index, "
@@ -366,7 +380,7 @@ bool ToolsInsideRepository::upsertSupportLink(const ToolsInsideSupportLink &supp
         return false;
     }
 
-    QSqlQuery query(QSqlDatabase::database(m_connectionName));
+    QSqlQuery query(QSqlDatabase::database(threadConnectionName(m_connectionName)));
     query.prepare(QStringLiteral(
         "INSERT INTO ti_support_links (support_link_id, trace_id, tool_call_id, target_kind, target_id, support_type, source, "
         "evidence_artifact_id, note, confidence, created_at_utc, metadata_json) "
@@ -400,7 +414,7 @@ bool ToolsInsideRepository::updateTraceStatus(const QString &traceId,
         return false;
     }
 
-    QSqlQuery query(QSqlDatabase::database(m_connectionName));
+    QSqlQuery query(QSqlDatabase::database(threadConnectionName(m_connectionName)));
     query.prepare(QStringLiteral("UPDATE ti_traces SET status = ? WHERE trace_id = ?"));
     query.addBindValue(status);
     query.addBindValue(traceId);
@@ -420,7 +434,7 @@ bool ToolsInsideRepository::updateArtifactPathPrefix(const QString &traceId,
     const QString prefix = oldPrefix.endsWith(QLatin1Char('/')) ? oldPrefix : oldPrefix + QLatin1Char('/');
     const QString replacement = newPrefix.endsWith(QLatin1Char('/')) ? newPrefix : newPrefix + QLatin1Char('/');
 
-    QSqlQuery query(QSqlDatabase::database(m_connectionName));
+    QSqlQuery query(QSqlDatabase::database(threadConnectionName(m_connectionName)));
     query.prepare(QStringLiteral(
         "UPDATE ti_artifacts SET relative_path = ? || substr(relative_path, ?) "
         "WHERE trace_id = ? AND relative_path LIKE ?"));
@@ -448,7 +462,7 @@ bool ToolsInsideRepository::deleteTrace(const QString &traceId, QString *errorMe
     };
 
     for (const QString &statement : statements) {
-        QSqlQuery query(QSqlDatabase::database(m_connectionName));
+        QSqlQuery query(QSqlDatabase::database(threadConnectionName(m_connectionName)));
         query.prepare(statement);
         query.addBindValue(traceId);
         if (!execQuery(query, errorMessage)) {
@@ -467,7 +481,7 @@ QList<ToolsInsideClientSummary> ToolsInsideRepository::listClients(QString *erro
         return clients;
     }
 
-    QSqlQuery query(QSqlDatabase::database(m_connectionName));
+    QSqlQuery query(QSqlDatabase::database(threadConnectionName(m_connectionName)));
     query.prepare(QStringLiteral(
         "SELECT client_id, COUNT(DISTINCT session_id), COUNT(*), MAX(started_at_utc) "
         "FROM ti_traces GROUP BY client_id ORDER BY MAX(started_at_utc) DESC"));
@@ -495,7 +509,7 @@ QList<ToolsInsideSessionSummary> ToolsInsideRepository::listSessions(const QStri
         return sessions;
     }
 
-    QSqlQuery query(QSqlDatabase::database(m_connectionName));
+    QSqlQuery query(QSqlDatabase::database(threadConnectionName(m_connectionName)));
     query.prepare(QStringLiteral(
         "SELECT session_id, COUNT(*), MAX(started_at_utc), "
         "(SELECT trace_id FROM ti_traces AS latest WHERE latest.client_id = ti_traces.client_id AND latest.session_id = ti_traces.session_id ORDER BY latest.started_at_utc DESC LIMIT 1) "
@@ -525,7 +539,7 @@ std::optional<ToolsInsideTraceSummary> ToolsInsideRepository::getTrace(const QSt
         return std::nullopt;
     }
 
-    QSqlQuery query(QSqlDatabase::database(m_connectionName));
+    QSqlQuery query(QSqlDatabase::database(threadConnectionName(m_connectionName)));
     query.prepare(QStringLiteral(
         "SELECT trace_id, client_id, session_id, root_request_id, status, model, provider, vendor, "
         "started_at_utc, ended_at_utc, final_answer_artifact_id, turn_input_preview, summary_json "
@@ -550,7 +564,7 @@ QList<ToolsInsideArtifactRef> ToolsInsideRepository::listArtifacts(const QString
         return artifacts;
     }
 
-    QSqlQuery query(QSqlDatabase::database(m_connectionName));
+    QSqlQuery query(QSqlDatabase::database(threadConnectionName(m_connectionName)));
     query.prepare(QStringLiteral(
         "SELECT artifact_id, trace_id, client_id, session_id, kind, mime_type, storage_type, relative_path, "
         "redaction_state, sha256, size_bytes, created_at_utc, metadata_json "
@@ -575,7 +589,7 @@ ToolsInsideStorageStats ToolsInsideRepository::getStorageStats(QString *errorMes
     }
 
     {
-        QSqlQuery query(QSqlDatabase::database(m_connectionName));
+        QSqlQuery query(QSqlDatabase::database(threadConnectionName(m_connectionName)));
         query.prepare(QStringLiteral(
             "SELECT COUNT(DISTINCT client_id), COUNT(DISTINCT client_id || '::' || session_id), COUNT(*) FROM ti_traces"));
         if (!execQuery(query, errorMessage)) {
@@ -589,7 +603,7 @@ ToolsInsideStorageStats ToolsInsideRepository::getStorageStats(QString *errorMes
     }
 
     {
-        QSqlQuery query(QSqlDatabase::database(m_connectionName));
+        QSqlQuery query(QSqlDatabase::database(threadConnectionName(m_connectionName)));
         query.prepare(QStringLiteral(
             "SELECT COUNT(*), COALESCE(SUM(size_bytes), 0), "
             "SUM(CASE WHEN relative_path LIKE 'archive/%' THEN 1 ELSE 0 END), "
@@ -630,7 +644,7 @@ QList<ToolsInsideTraceSummary> ToolsInsideRepository::listTraces(const ToolsInsi
     }
     sql += QStringLiteral(" ORDER BY started_at_utc DESC LIMIT ?");
 
-    QSqlQuery query(QSqlDatabase::database(m_connectionName));
+    QSqlQuery query(QSqlDatabase::database(threadConnectionName(m_connectionName)));
     query.prepare(sql);
     if (!filter.clientId.trimmed().isEmpty()) {
         query.addBindValue(filter.clientId.trimmed());
@@ -671,7 +685,7 @@ QList<ToolsInsideEventRecord> ToolsInsideRepository::listEvents(const QString &t
         return events;
     }
 
-    QSqlQuery query(QSqlDatabase::database(m_connectionName));
+    QSqlQuery query(QSqlDatabase::database(threadConnectionName(m_connectionName)));
     query.prepare(QStringLiteral(
         "SELECT event_id, trace_id, span_id, request_id, tool_call_id, category, name, timestamp_utc, payload_json "
         "FROM ti_events WHERE trace_id = ? ORDER BY timestamp_utc ASC"));
@@ -704,7 +718,7 @@ QList<ToolsInsideSpanRecord> ToolsInsideRepository::listSpans(const QString &tra
         return spans;
     }
 
-    QSqlQuery query(QSqlDatabase::database(m_connectionName));
+    QSqlQuery query(QSqlDatabase::database(threadConnectionName(m_connectionName)));
     query.prepare(QStringLiteral(
         "SELECT span_id, trace_id, parent_span_id, request_id, tool_call_id, kind, name, status, error_code, started_at_utc, ended_at_utc, summary_json "
         "FROM ti_spans WHERE trace_id = ? ORDER BY started_at_utc ASC"));
@@ -740,7 +754,7 @@ QList<ToolsInsideToolCallRecord> ToolsInsideRepository::listToolCalls(const QStr
         return toolCalls;
     }
 
-    QSqlQuery query(QSqlDatabase::database(m_connectionName));
+    QSqlQuery query(QSqlDatabase::database(threadConnectionName(m_connectionName)));
     query.prepare(QStringLiteral(
         "SELECT tool_call_id, external_call_id, trace_id, request_id, tool_id, tool_name, tool_category, server_id, invocation_name, "
         "arguments_artifact_id, output_artifact_id, followup_artifact_id, status, error_code, error_message, retryable, round_index, "
@@ -786,7 +800,7 @@ QList<ToolsInsideSupportLink> ToolsInsideRepository::listSupportLinks(const QStr
         return links;
     }
 
-    QSqlQuery query(QSqlDatabase::database(m_connectionName));
+    QSqlQuery query(QSqlDatabase::database(threadConnectionName(m_connectionName)));
     query.prepare(QStringLiteral(
         "SELECT support_link_id, trace_id, tool_call_id, target_kind, target_id, support_type, source, evidence_artifact_id, note, confidence, created_at_utc, metadata_json "
         "FROM ti_support_links WHERE trace_id = ? ORDER BY created_at_utc ASC"));
@@ -816,7 +830,7 @@ QList<ToolsInsideSupportLink> ToolsInsideRepository::listSupportLinks(const QStr
 
 bool ToolsInsideRepository::ensureConnectionLocked(QString *errorMessage) const
 {
-    if (!QSqlDatabase::contains(m_connectionName)) {
+    if (!QSqlDatabase::contains(threadConnectionName(m_connectionName))) {
         QDir dir(QFileInfo(m_databasePath).absolutePath());
         if (!dir.exists() && !dir.mkpath(QStringLiteral("."))) {
             if (errorMessage) {
@@ -825,11 +839,11 @@ bool ToolsInsideRepository::ensureConnectionLocked(QString *errorMessage) const
             return false;
         }
 
-        QSqlDatabase database = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), m_connectionName);
+        QSqlDatabase database = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), threadConnectionName(m_connectionName));
         database.setDatabaseName(m_databasePath);
     }
 
-    QSqlDatabase database = QSqlDatabase::database(m_connectionName);
+    QSqlDatabase database = QSqlDatabase::database(threadConnectionName(m_connectionName));
     if (database.isOpen()) {
         return true;
     }
@@ -849,7 +863,7 @@ bool ToolsInsideRepository::runMigrationsLocked(QString *errorMessage) const
     constexpr int kSchemaVersion = 2;
 
     {
-        QSqlQuery versionQuery(QSqlDatabase::database(m_connectionName));
+        QSqlQuery versionQuery(QSqlDatabase::database(threadConnectionName(m_connectionName)));
         if (!versionQuery.exec(QStringLiteral("PRAGMA user_version"))) {
             if (errorMessage) {
                 *errorMessage = versionQuery.lastError().text();
@@ -873,7 +887,7 @@ bool ToolsInsideRepository::runMigrationsLocked(QString *errorMessage) const
             };
 
             for (const QString &statement : resetStatements) {
-                QSqlQuery resetQuery(QSqlDatabase::database(m_connectionName));
+                QSqlQuery resetQuery(QSqlDatabase::database(threadConnectionName(m_connectionName)));
                 if (!resetQuery.exec(statement)) {
                     if (errorMessage) {
                         *errorMessage = resetQuery.lastError().text();
@@ -894,7 +908,7 @@ bool ToolsInsideRepository::runMigrationsLocked(QString *errorMessage) const
     };
 
     for (const QString &statement : statements) {
-        QSqlQuery query(QSqlDatabase::database(m_connectionName));
+        QSqlQuery query(QSqlDatabase::database(threadConnectionName(m_connectionName)));
         if (!query.exec(statement)) {
             if (errorMessage) {
                 *errorMessage = query.lastError().text();
@@ -903,7 +917,7 @@ bool ToolsInsideRepository::runMigrationsLocked(QString *errorMessage) const
         }
     }
 
-    QSqlQuery versionUpdate(QSqlDatabase::database(m_connectionName));
+    QSqlQuery versionUpdate(QSqlDatabase::database(threadConnectionName(m_connectionName)));
     if (!versionUpdate.exec(QStringLiteral("PRAGMA user_version = 2"))) {
         if (errorMessage) {
             *errorMessage = versionUpdate.lastError().text();

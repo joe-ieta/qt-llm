@@ -1,0 +1,6 @@
+1)背景压缩到底做了什么？如何不遗忘？应该不是压缩，而是将于当前直接相关的主题抽取形成新背景，（这里针对人，要有一个展示，往往是人遗忘了）
+2）聊天结构定义了一个显式文档结构，应该抽取背后的语义结构：（如何表达不同行业的语义？要回到业务建模，四大模型以及5W1H等描述框架下）；按照时间顺序抽取的给人类的recall。
+
+3）一个简单的交互界面非常关键。
+
+opencode/codex:when codex working, it murmur out sth. this makes user understant what it doing and how ,and why, this may help user to understand the project a lot more than a silence good job. 
