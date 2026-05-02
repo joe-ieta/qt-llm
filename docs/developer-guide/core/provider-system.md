@@ -111,7 +111,7 @@ client->setProviderByName(QStringLiteral("openai-compatible"));
 
 - 面向项目托管的本地 `llama-server`
 - 协议仍走 OpenAI-compatible `/v1/chat/completions`
-- 默认运行态目录为应用目录下的 `llama-cpp-runtime/`
+- 默认通过 Host App 约束中的共享运行态搜索顺序查找 `llama-cpp-runtime/`
 
 ### `VllmProvider`
 

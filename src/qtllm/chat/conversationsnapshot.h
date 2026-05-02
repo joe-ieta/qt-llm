@@ -135,6 +135,12 @@ struct ConversationSnapshot
         configObject.insert(QStringLiteral("llamaCppModelPath"), config.llamaCppModelPath);
         configObject.insert(QStringLiteral("llamaCppExtraArgs"), QJsonArray::fromStringList(config.llamaCppExtraArgs));
         configObject.insert(QStringLiteral("stream"), config.stream);
+        configObject.insert(QStringLiteral("providerAvailable"), config.providerAvailable);
+        configObject.insert(QStringLiteral("providerAvailabilityStatus"), config.providerAvailabilityStatus);
+        configObject.insert(QStringLiteral("providerAvailabilityMessage"), config.providerAvailabilityMessage);
+        configObject.insert(QStringLiteral("resolvedRuntimeRoot"), config.resolvedRuntimeRoot);
+        configObject.insert(QStringLiteral("resolvedModelPath"), config.resolvedModelPath);
+        configObject.insert(QStringLiteral("localModelCount"), config.localModelCount);
         configObject.insert(QStringLiteral("timeoutMs"), config.timeoutMs);
         configObject.insert(QStringLiteral("maxRetries"), config.maxRetries);
         configObject.insert(QStringLiteral("retryDelayMs"), config.retryDelayMs);
@@ -180,6 +186,12 @@ struct ConversationSnapshot
             }
         }
         snapshot.config.stream = configObject.value(QStringLiteral("stream")).toBool(snapshot.config.stream);
+        snapshot.config.providerAvailable = configObject.value(QStringLiteral("providerAvailable")).toBool(snapshot.config.providerAvailable);
+        snapshot.config.providerAvailabilityStatus = configObject.value(QStringLiteral("providerAvailabilityStatus")).toString();
+        snapshot.config.providerAvailabilityMessage = configObject.value(QStringLiteral("providerAvailabilityMessage")).toString();
+        snapshot.config.resolvedRuntimeRoot = configObject.value(QStringLiteral("resolvedRuntimeRoot")).toString();
+        snapshot.config.resolvedModelPath = configObject.value(QStringLiteral("resolvedModelPath")).toString();
+        snapshot.config.localModelCount = configObject.value(QStringLiteral("localModelCount")).toInt(snapshot.config.localModelCount);
         snapshot.config.timeoutMs = configObject.value(QStringLiteral("timeoutMs")).toInt(snapshot.config.timeoutMs);
         snapshot.config.maxRetries = configObject.value(QStringLiteral("maxRetries")).toInt(snapshot.config.maxRetries);
         snapshot.config.retryDelayMs = configObject.value(QStringLiteral("retryDelayMs")).toInt(snapshot.config.retryDelayMs);

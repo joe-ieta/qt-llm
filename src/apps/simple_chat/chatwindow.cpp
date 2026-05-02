@@ -1,14 +1,6 @@
 ﻿#include "chatwindow.h"
 
-#include "../../qtllm/core/llmconfig.h"
-#include "../../qtllm/core/qtllmclient.h"
-#include "../../qtllm/providers/illmprovider.h"
-#include "../../qtllm/providers/llamacppprovider.h"
-#include "../../qtllm/providers/ollamaprovider.h"
-#include "../../qtllm/providers/openaiprovider.h"
-#include "../../qtllm/providers/openaicompatibleprovider.h"
-#include "../../qtllm/providers/vllmprovider.h"
-#include "../../qtllm/runtime/managedllamacppruntime.h"
+#include "../../qtllm/host/runtimefacade.h"
 
 #include <QComboBox>
 #include <QEvent>
@@ -18,6 +10,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
+#include <QFileInfo>
 #include <QLineEdit>
 #include <QList>
 #include <QNetworkAccessManager>
@@ -28,8 +21,6 @@
 #include <QTextEdit>
 #include <QUrl>
 #include <QVBoxLayout>
-
-#include <memory>
 
 namespace {
 
@@ -65,21 +56,12 @@ const ProviderOption *findProviderOption(const QString &providerId)
     return nullptr;
 }
 
-std::unique_ptr<qtllm::ILLMProvider> createProviderById(const QString &providerId)
+bool isManagedLlamaCppProvider(const QString &providerId)
 {
-    if (qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(providerId)) {
-        return std::make_unique<qtllm::LlamaCppProvider>();
-    }
-    if (providerId == QStringLiteral("ollama")) {
-        return std::make_unique<qtllm::OllamaProvider>();
-    }
-    if (providerId == QStringLiteral("vllm")) {
-        return std::make_unique<qtllm::VllmProvider>();
-    }
-    if (providerId == QStringLiteral("openai")) {
-        return std::make_unique<qtllm::OpenAIProvider>();
-    }
-    return std::make_unique<qtllm::OpenAICompatibleProvider>();
+    const QString provider = providerId.trimmed().toLower();
+    return provider == QStringLiteral("llama-cpp")
+        || provider == QStringLiteral("llamacpp")
+        || provider == QStringLiteral("llama-cpp-local");
 }
 
 QUrl buildModelsUrl(const QString &baseUrl)
@@ -109,7 +91,7 @@ ChatWindow::ChatWindow(QWidget *parent)
     , m_output(new QTextEdit(this))
     , m_input(new QLineEdit(this))
     , m_sendButton(new QPushButton(QStringLiteral("Send"), this))
-    , m_client(new qtllm::QtLLMClient(this))
+    , m_runtime(new qtllm::host::RuntimeFacade(this))
     , m_networkManager(new QNetworkAccessManager(this))
 {
     m_output->setReadOnly(true);
@@ -156,7 +138,7 @@ ChatWindow::ChatWindow(QWidget *parent)
             this, [this](const QString &) { applyConfigToClient(); });
 
     connect(m_sendButton, &QPushButton::clicked, this, &ChatWindow::onSendClicked);
-    connect(m_client, &qtllm::QtLLMClient::tokenReceived, this, [this](const QString &token) {
+    connect(m_runtime, &qtllm::host::RuntimeFacade::tokenReceived, this, [this](const QString &token) {
         m_output->moveCursor(QTextCursor::End);
         if (m_reasoningVisible && !m_contentVisible) {
             m_output->insertPlainText(QStringLiteral("\n[answer] "));
@@ -164,7 +146,7 @@ ChatWindow::ChatWindow(QWidget *parent)
         m_contentVisible = true;
         m_output->insertPlainText(token);
     });
-    connect(m_client, &qtllm::QtLLMClient::reasoningTokenReceived, this, [this](const QString &token) {
+    connect(m_runtime, &qtllm::host::RuntimeFacade::reasoningTokenReceived, this, [this](const QString &token) {
         m_output->moveCursor(QTextCursor::End);
         if (!m_reasoningVisible) {
             m_output->insertPlainText(QStringLiteral("\n[thinking] "));
@@ -172,16 +154,30 @@ ChatWindow::ChatWindow(QWidget *parent)
         }
         m_output->insertPlainText(token);
     });
-    connect(m_client, &qtllm::QtLLMClient::completed, this, [this](const QString &) {
+    connect(m_runtime, &qtllm::host::RuntimeFacade::completed, this, [this](const qtllm::host::ChatResult &) {
         m_output->append(QString());
         m_output->append(QStringLiteral("--- done ---"));
         m_reasoningVisible = false;
         m_contentVisible = false;
     });
-    connect(m_client, &qtllm::QtLLMClient::errorOccurred, this, [this](const QString &message) {
-        m_output->append(QStringLiteral("[error] ") + message);
+    connect(m_runtime, &qtllm::host::RuntimeFacade::errorOccurred, this, [this](const qtllm::host::ChatResult &result) {
+        m_output->append(QStringLiteral("[error] ") + result.errorMessage);
         m_reasoningVisible = false;
         m_contentVisible = false;
+    });
+    connect(m_runtime, &qtllm::host::RuntimeFacade::runtimeStatusChanged,
+            this, [this](const QString &status, const QString &detail) {
+        if (status == QStringLiteral("request_started")) {
+            setStatusMessage(QStringLiteral("请求已发送: ") + detail, false);
+        } else if (status == QStringLiteral("completed")) {
+            setStatusMessage(QStringLiteral("请求完成: ") + detail, false);
+        } else if (status == QStringLiteral("provider_available")) {
+            setStatusMessage(detail, false);
+        } else if (status == QStringLiteral("provider_unavailable")) {
+            setStatusMessage(detail, true);
+        } else if (status == QStringLiteral("error")) {
+            setStatusMessage(detail, true);
+        }
     });
 
     m_providerCombo->setCurrentIndex(0);
@@ -269,17 +265,19 @@ void ChatWindow::onSendClicked()
         return;
     }
 
+    applyConfigToClient();
     if (!validateConfig(true)) {
         return;
     }
-
-    applyConfigToClient();
 
     m_reasoningVisible = false;
     m_contentVisible = false;
     m_output->append(QStringLiteral("\n> ") + prompt);
     m_input->clear();
-    m_client->sendPrompt(prompt);
+
+    qtllm::host::ChatRequest request;
+    request.userPrompt = prompt;
+    m_runtime->send(request);
 }
 
 bool ChatWindow::eventFilter(QObject *watched, QEvent *event)
@@ -292,22 +290,20 @@ bool ChatWindow::eventFilter(QObject *watched, QEvent *event)
 
 void ChatWindow::applyConfigToClient()
 {
-    qtllm::LlmConfig config;
-    config.providerName = selectedProviderId();
-    config.baseUrl = m_baseUrlEdit->text().trimmed();
-    config.apiKey = m_apiKeyEdit->text().trimmed();
-    config.model = m_modelCombo->currentText().trimmed();
-    config.stream = true;
-    if (qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(config.providerName)) {
-        config.runtimeName = QStringLiteral("llama-cpp-managed");
+    qtllm::host::RuntimeProfile profile;
+    profile.providerName = selectedProviderId();
+    profile.baseUrl = m_baseUrlEdit->text().trimmed();
+    profile.apiKey = m_apiKeyEdit->text().trimmed();
+    profile.model = m_modelCombo->currentText().trimmed();
+    profile.stream = true;
+    if (isManagedLlamaCppProvider(profile.providerName)) {
         const QString modelPath = m_modelCombo->currentData().toString();
         if (!modelPath.isEmpty()) {
-            config.llamaCppModelPath = modelPath;
+            profile.llamaCppModelPath = modelPath;
         }
     }
 
-    m_client->setConfig(config);
-    m_client->setProvider(createProviderById(config.providerName));
+    m_runtime->setProfile(profile);
 }
 
 bool ChatWindow::validateConfig(bool showMessage)
@@ -332,6 +328,12 @@ bool ChatWindow::validateConfig(bool showMessage)
     } else if (m_modelCombo->currentText().trimmed().isEmpty()) {
         ok = false;
         message = QStringLiteral("请先加载并选择模型");
+    } else if (isManagedLlamaCppProvider(providerId) && !m_runtime->profile().providerAvailable) {
+        ok = false;
+        message = m_runtime->profile().providerAvailabilityMessage;
+        if (message.trimmed().isEmpty()) {
+            message = QStringLiteral("llama.cpp 本地模型运行态不可用");
+        }
     }
 
     m_sendButton->setEnabled(ok);
@@ -378,26 +380,30 @@ void ChatWindow::refreshModels()
         return;
     }
 
-    if (qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(providerId)) {
-        qtllm::runtime::LlamaCppRuntimeLayout layout;
+    if (isManagedLlamaCppProvider(providerId)) {
         QString errorMessage;
-        qtllm::LlmConfig config;
-        config.providerName = providerId;
         const QString previousModel = m_modelCombo->currentText();
         const QString previousModelPath = m_modelCombo->currentData().toString();
-        const QList<qtllm::runtime::LlamaCppLocalModel> models =
-            qtllm::runtime::ManagedLlamaCppRuntime::listLocalModels(config, &layout, &errorMessage);
+        const QList<qtllm::host::LocalModelInfo> models = m_runtime->listLocalModels(&errorMessage);
         if (!errorMessage.isEmpty()) {
             setStatusMessage(errorMessage, true);
             m_sendButton->setEnabled(false);
             return;
         }
         m_modelCombo->clear();
-        for (const qtllm::runtime::LlamaCppLocalModel &model : models) {
+        QString modelsDir;
+        for (const qtllm::host::LocalModelInfo &model : models) {
             m_modelCombo->addItem(model.displayName, model.filePath);
+            if (modelsDir.isEmpty()) {
+                modelsDir = QFileInfo(model.filePath).absolutePath();
+            }
         }
         if (m_modelCombo->count() == 0) {
-            setStatusMessage(QStringLiteral("未找到 GGUF 模型，请将 .gguf 放入 %1").arg(layout.modelsDir), true);
+            const qtllm::host::RuntimeProfile profile = m_runtime->profile();
+            const QString hint = profile.llamaCppRuntimeRoot.trimmed().isEmpty()
+                ? QStringLiteral("App 运行目录下的 llama-cpp/models")
+                : profile.llamaCppRuntimeRoot.trimmed() + QStringLiteral("/models");
+            setStatusMessage(QStringLiteral("未找到 GGUF 模型，请将 .gguf 放入 %1").arg(hint), true);
             m_sendButton->setEnabled(false);
             return;
         }
@@ -408,7 +414,7 @@ void ChatWindow::refreshModels()
         m_modelCombo->setCurrentIndex(previousIndex >= 0 ? previousIndex : 0);
         setStatusMessage(QStringLiteral("已加载 %1 个本地 GGUF 模型: %2")
                              .arg(m_modelCombo->count())
-                             .arg(layout.modelsDir),
+                             .arg(modelsDir),
                          false);
         m_sendButton->setEnabled(true);
         applyConfigToClient();

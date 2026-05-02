@@ -17,6 +17,15 @@ struct LlamaCppRuntimeLayout
     QString modelsDir;
     QString logsDir;
     QString executablePath;
+    QString resolvedModelPath;
+    QString discoverySource;
+    QString availabilityStatus;
+    QString availabilityMessage;
+    bool runtimeRootFound = false;
+    bool executableAvailable = false;
+    bool modelAvailable = false;
+    bool available = false;
+    int modelCount = 0;
 };
 
 struct LlamaCppLocalModel
@@ -36,6 +45,9 @@ public:
     static bool isManagedProvider(const QString &providerName);
     static QString defaultBaseUrl(int port = 18080);
     static LlamaCppRuntimeLayout defaultLayout(const LlmConfig &config = {});
+    static bool updateRuntimeAvailability(LlmConfig *config,
+                                          LlamaCppRuntimeLayout *layout = nullptr,
+                                          QString *errorMessage = nullptr);
     static bool ensureDefaultLayout(const LlmConfig &config, LlamaCppRuntimeLayout *layout, QString *errorMessage);
     static QList<LlamaCppLocalModel> listLocalModels(const LlmConfig &config = {},
                                                      LlamaCppRuntimeLayout *layout = nullptr,

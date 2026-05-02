@@ -15,6 +15,7 @@ The project now serves three roles at once:
 
 The current scope includes:
 - base LLM request/response handling
+- host-facing runtime facade for external Qt applications
 - provider abstraction and provider factory
 - multi-client and multi-session conversation persistence
 - profile-driven context construction
@@ -33,6 +34,9 @@ The current scope includes:
 4. keep the library core decoupled from UI policy
 5. support local-first and intranet-friendly deployment
 6. evolve by adding subsystems rather than rewriting the core request path
+7. keep Host App integration behind stable `qtllm` APIs instead of making each
+   Host App understand provider factories, managed runtime layout, or transport
+   internals
 
 ## 4. Technical Baseline
 
@@ -46,6 +50,8 @@ Constraints:
 - avoid heavy runtime dependencies
 - avoid scattering vendor protocol details into UI and orchestration layers
 - avoid mixing application-specific policy into provider and transport code
+- avoid duplicating `RuntimeProfile` to `LlmConfig` mapping, local GGUF model
+  discovery, or managed llama.cpp startup logic in external Host Apps
 
 ## 5. Module Baseline
 
@@ -54,6 +60,7 @@ Constraints:
 `src/qtllm/` currently contains:
 - `core`
 - `chat`
+- `host`
 - `profile`
 - `storage`
 - `providers`
@@ -93,6 +100,7 @@ Flows 3 through 5 are now part of the baseline architecture and should not be de
 ### Available today
 
 - `QtLLMClient` async request orchestration
+- `RuntimeFacade` Host App request facade and local model discovery
 - `ConversationClientFactory` multi-client persistence
 - `OpenAIProvider` and `OpenAICompatibleProvider`
 - tool loop, protocol routing, execution, and failure guard
@@ -125,3 +133,18 @@ The project is not trying to become:
 - a single monolithic app that absorbs every subsystem
 
 This documentation refresh also does not change business behavior.
+
+## 10. Host App Integration Rule
+
+External Qt applications should use
+[docs/HOST_APP_INTEGRATION.md](./docs/HOST_APP_INTEGRATION.md) as the canonical
+integration guide.
+
+The preferred path for simple embedding is `qtllm::host::RuntimeFacade`.
+`QtLLMClient` remains the core request engine. `ConversationClient` remains the
+multi-session chat API. `ToolEnabledChatEntry` remains the tool/MCP entry.
+
+Provider creation, managed llama.cpp runtime interpretation, local model
+discovery, request execution, stream parsing, logging, tracing, and cancellation
+must remain owned by `qt-llm` unless a Host App explicitly opts into advanced
+low-level integration.

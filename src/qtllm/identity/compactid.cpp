@@ -130,7 +130,7 @@ int decodeChar(const QChar ch)
         return 27;
     case 'w':
         return 28;
-    case 'X':
+    case 'x':
         return 29;
     case 'y':
         return 30;

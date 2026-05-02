@@ -1,10 +1,14 @@
 #include "managedllamacppruntime.h"
 
+#include "../logging/qtllmlogger.h"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QProcess>
 #include <QStringList>
 #include <QTcpSocket>
@@ -14,12 +18,174 @@ namespace qtllm::runtime {
 
 namespace {
 
-QString appRuntimeRoot()
+constexpr const char *kRuntimeDirName = "llama-cpp-runtime";
+
+QString appDirPath()
 {
-    const QString appDir = QCoreApplication::instance()
+    return QCoreApplication::instance()
         ? QCoreApplication::applicationDirPath()
         : QDir::currentPath();
-    return QDir(appDir).filePath(QStringLiteral("llama-cpp-runtime"));
+}
+
+QString runtimeChildIfPresent(const QString &basePath)
+{
+    const QString trimmed = basePath.trimmed();
+    if (trimmed.isEmpty()) {
+        return QString();
+    }
+
+    const QFileInfo directInfo(trimmed);
+    if (directInfo.exists()
+        && directInfo.isDir()
+        && directInfo.fileName().compare(QString::fromLatin1(kRuntimeDirName), Qt::CaseInsensitive) == 0) {
+        return directInfo.absoluteFilePath();
+    }
+
+    const QFileInfo childInfo(QDir(trimmed).filePath(QString::fromLatin1(kRuntimeDirName)));
+    if (childInfo.exists() && childInfo.isDir()) {
+        return childInfo.absoluteFilePath();
+    }
+    return QString();
+}
+
+void appendCandidate(QStringList *candidates, const QString &candidate)
+{
+    if (!candidates) {
+        return;
+    }
+
+    const QString trimmed = candidate.trimmed();
+    if (trimmed.isEmpty()) {
+        return;
+    }
+    const QString normalized = QDir::fromNativeSeparators(trimmed);
+    if (!candidates->contains(normalized, Qt::CaseInsensitive)) {
+        candidates->append(normalized);
+    }
+}
+
+QStringList splitEnvironmentPath(const QByteArray &value)
+{
+    QString text = QString::fromLocal8Bit(value).trimmed();
+    if (text.isEmpty()) {
+        return {};
+    }
+
+    QStringList parts;
+#ifdef Q_OS_WIN
+    parts = text.split(';', Qt::SkipEmptyParts);
+#else
+    parts = text.split(':', Qt::SkipEmptyParts);
+#endif
+    if (parts.isEmpty()) {
+        parts.append(text);
+    }
+    return parts;
+}
+
+QStringList runtimeSearchCandidates()
+{
+    QStringList candidates;
+
+    appendCandidate(&candidates, appDirPath());
+
+    const QStringList envNames = {
+        QStringLiteral("ZNZ_HOME"),
+        QStringLiteral("ZNZ_BLACKBOARD"),
+        QStringLiteral("YIDA_HOME"),
+        QStringLiteral("YIDA_BLACKBOARD"),
+        QStringLiteral("IETA_HOME"),
+        QStringLiteral("IETA_BLACKBOARD"),
+    };
+    for (const QString &envName : envNames) {
+        const QByteArray value = qgetenv(envName.toLocal8Bit().constData());
+        for (const QString &path : splitEnvironmentPath(value)) {
+            appendCandidate(&candidates, path);
+        }
+    }
+
+#ifdef Q_OS_WIN
+    const QFileInfoList drives = QDir::drives();
+    for (const QFileInfo &drive : drives) {
+        appendCandidate(&candidates, QDir(drive.absoluteFilePath()).filePath(QStringLiteral("LLMs")));
+    }
+#else
+    appendCandidate(&candidates, QStringLiteral("/home/ieta/LLMs"));
+    appendCandidate(&candidates, QStringLiteral("/home/IETA/LLMs"));
+#endif
+
+    return candidates;
+}
+
+QString resolveRuntimeRoot(const LlmConfig &config, QString *source, QStringList *searchedLocations)
+{
+    if (source) {
+        source->clear();
+    }
+    if (searchedLocations) {
+        searchedLocations->clear();
+    }
+
+    const QString explicitRoot = config.llamaCppRuntimeRoot.trimmed();
+    if (!explicitRoot.isEmpty()) {
+        if (source) {
+            *source = QStringLiteral("config.llamaCppRuntimeRoot");
+        }
+        return QFileInfo(explicitRoot).absoluteFilePath();
+    }
+
+    const QStringList candidates = runtimeSearchCandidates();
+    for (const QString &candidate : candidates) {
+        const QString runtimeRoot = runtimeChildIfPresent(candidate);
+        const QString searched = runtimeRoot.isEmpty()
+            ? QDir(candidate).filePath(QString::fromLatin1(kRuntimeDirName))
+            : runtimeRoot;
+        appendCandidate(searchedLocations, searched);
+        if (!runtimeRoot.isEmpty()) {
+            if (source) {
+                *source = candidate == appDirPath()
+                    ? QStringLiteral("applicationDirPath")
+                    : QStringLiteral("runtimeSearchPath");
+            }
+            return runtimeRoot;
+        }
+    }
+
+    return QString();
+}
+
+QStringList localModelFiles(const QString &modelsDir)
+{
+    return QDir(modelsDir).entryList(QStringList({QStringLiteral("*.gguf")}),
+                                     QDir::Files,
+                                     QDir::Name | QDir::IgnoreCase);
+}
+
+QString findConfiguredModelPath(const LlmConfig &config, const QString &modelsDir)
+{
+    const QString explicitPath = config.llamaCppModelPath.trimmed();
+    if (!explicitPath.isEmpty()) {
+        return QFileInfo(explicitPath).absoluteFilePath();
+    }
+
+    const QString modelName = config.model.trimmed();
+    const QDir dir(modelsDir);
+    const QStringList files = localModelFiles(modelsDir);
+    if (!modelName.isEmpty()) {
+        for (const QString &fileName : files) {
+            const QFileInfo info(dir.absoluteFilePath(fileName));
+            if (fileName.compare(modelName, Qt::CaseInsensitive) == 0
+                || info.completeBaseName().compare(modelName, Qt::CaseInsensitive) == 0) {
+                return info.absoluteFilePath();
+            }
+        }
+        return dir.absoluteFilePath(modelName);
+    }
+
+    if (files.size() == 1) {
+        return dir.absoluteFilePath(files.first());
+    }
+    return QString();
 }
 
 QString normalizedProvider(const QString &providerName)
@@ -57,9 +223,14 @@ QString ManagedLlamaCppRuntime::defaultBaseUrl(int port)
 LlamaCppRuntimeLayout ManagedLlamaCppRuntime::defaultLayout(const LlmConfig &config)
 {
     LlamaCppRuntimeLayout layout;
-    layout.rootDir = config.llamaCppRuntimeRoot.trimmed().isEmpty()
-        ? appRuntimeRoot()
-        : config.llamaCppRuntimeRoot.trimmed();
+    layout.rootDir = resolveRuntimeRoot(config, &layout.discoverySource, nullptr);
+    layout.runtimeRootFound = !layout.rootDir.trimmed().isEmpty() && QFileInfo(layout.rootDir).isDir();
+    if (layout.rootDir.trimmed().isEmpty()) {
+        layout.availabilityStatus = QStringLiteral("runtime_not_found");
+        layout.availabilityMessage = QStringLiteral("llama.cpp runtime root not found");
+        return layout;
+    }
+
     QDir root(layout.rootDir);
     layout.binDir = root.filePath(QStringLiteral("bin"));
     layout.modelsDir = root.filePath(QStringLiteral("models"));
@@ -74,7 +245,109 @@ LlamaCppRuntimeLayout ManagedLlamaCppRuntime::defaultLayout(const LlmConfig &con
         layout.executablePath = QDir(layout.binDir).filePath(QStringLiteral("llama-server"));
 #endif
     }
+    layout.executableAvailable = QFileInfo(layout.executablePath).isFile();
+    layout.modelCount = localModelFiles(layout.modelsDir).size();
+    layout.resolvedModelPath = findConfiguredModelPath(config, layout.modelsDir);
+    layout.modelAvailable = !layout.resolvedModelPath.trimmed().isEmpty()
+        ? QFileInfo(layout.resolvedModelPath).isFile()
+        : layout.modelCount > 0;
+    layout.available = layout.runtimeRootFound && layout.executableAvailable && layout.modelAvailable;
+    if (layout.available) {
+        layout.availabilityStatus = QStringLiteral("available");
+        layout.availabilityMessage = QStringLiteral("llama.cpp runtime is available");
+    } else if (!layout.executableAvailable) {
+        layout.availabilityStatus = QStringLiteral("executable_not_found");
+        layout.availabilityMessage = QStringLiteral("llama.cpp server executable not found: %1").arg(layout.executablePath);
+    } else {
+        layout.availabilityStatus = QStringLiteral("model_not_found");
+        layout.availabilityMessage = layout.modelCount > 0 && !config.model.trimmed().isEmpty()
+            ? QStringLiteral("Configured GGUF model not found: %1").arg(config.model.trimmed())
+            : QStringLiteral("GGUF model not found in %1").arg(layout.modelsDir);
+    }
     return layout;
+}
+
+bool ManagedLlamaCppRuntime::updateRuntimeAvailability(LlmConfig *config,
+                                                       LlamaCppRuntimeLayout *layout,
+                                                       QString *errorMessage)
+{
+    if (!config) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("Missing LlmConfig for llama.cpp runtime availability check");
+        }
+        return false;
+    }
+
+    QStringList searchedLocations;
+    QString source;
+    const QString rootDir = resolveRuntimeRoot(*config, &source, &searchedLocations);
+    LlamaCppRuntimeLayout resolved = defaultLayout(*config);
+    if (resolved.rootDir.trimmed().isEmpty()) {
+        resolved.discoverySource = source;
+        resolved.availabilityStatus = QStringLiteral("runtime_not_found");
+        resolved.availabilityMessage =
+            QStringLiteral("llama.cpp runtime root not found. Searched: %1")
+                .arg(searchedLocations.isEmpty()
+                         ? QStringLiteral("<none>")
+                         : searchedLocations.join(QStringLiteral("; ")));
+    }
+
+    config->runtimeName = QStringLiteral("llama-cpp-managed");
+    config->providerName = QStringLiteral("llama-cpp");
+    config->llamaCppRuntimeRoot = rootDir;
+    config->resolvedRuntimeRoot = resolved.rootDir;
+    config->llamaCppExecutablePath = config->llamaCppExecutablePath.trimmed().isEmpty()
+        ? resolved.executablePath
+        : config->llamaCppExecutablePath.trimmed();
+    config->localModelCount = resolved.modelCount;
+    config->providerAvailable = resolved.available;
+    config->providerAvailabilityStatus = resolved.availabilityStatus;
+    config->providerAvailabilityMessage = resolved.availabilityMessage;
+
+    if (config->llamaCppModelPath.trimmed().isEmpty()
+        && !resolved.resolvedModelPath.trimmed().isEmpty()
+        && QFileInfo(resolved.resolvedModelPath).isFile()) {
+        config->llamaCppModelPath = resolved.resolvedModelPath;
+    } else if (config->llamaCppModelPath.trimmed().isEmpty() && resolved.modelCount == 1) {
+        const QStringList files = localModelFiles(resolved.modelsDir);
+        if (!files.isEmpty()) {
+            config->llamaCppModelPath = QDir(resolved.modelsDir).absoluteFilePath(files.first());
+        }
+    }
+    config->resolvedModelPath = !resolved.resolvedModelPath.trimmed().isEmpty()
+        ? resolved.resolvedModelPath
+        : config->llamaCppModelPath.trimmed();
+
+    if (layout) {
+        *layout = resolved;
+    }
+
+    if (!resolved.available) {
+        if (errorMessage) {
+            *errorMessage = resolved.availabilityMessage;
+        }
+
+        QJsonArray searched;
+        for (const QString &location : searchedLocations) {
+            searched.append(location);
+        }
+        logging::QtLlmLogger::instance().error(
+            QStringLiteral("llm.runtime"),
+            QStringLiteral("Managed llama.cpp runtime unavailable"),
+            logging::LogContext(),
+            QJsonObject{{QStringLiteral("status"), resolved.availabilityStatus},
+                        {QStringLiteral("message"), resolved.availabilityMessage},
+                        {QStringLiteral("runtimeRoot"), resolved.rootDir},
+                        {QStringLiteral("executablePath"), resolved.executablePath},
+                        {QStringLiteral("modelCount"), resolved.modelCount},
+                        {QStringLiteral("searched"), searched}});
+        return false;
+    }
+
+    if (errorMessage) {
+        errorMessage->clear();
+    }
+    return true;
 }
 
 bool ManagedLlamaCppRuntime::ensureDefaultLayout(const LlmConfig &config,
@@ -82,6 +355,19 @@ bool ManagedLlamaCppRuntime::ensureDefaultLayout(const LlmConfig &config,
                                                  QString *errorMessage)
 {
     const LlamaCppRuntimeLayout resolved = defaultLayout(config);
+    if (resolved.rootDir.trimmed().isEmpty()) {
+        if (errorMessage) {
+            *errorMessage = resolved.availabilityMessage;
+        }
+        logging::QtLlmLogger::instance().error(
+            QStringLiteral("llm.runtime"),
+            QStringLiteral("Managed llama.cpp runtime root not found"),
+            logging::LogContext(),
+            QJsonObject{{QStringLiteral("status"), resolved.availabilityStatus},
+                        {QStringLiteral("message"), resolved.availabilityMessage}});
+        return false;
+    }
+
     const QStringList dirs = {resolved.rootDir, resolved.binDir, resolved.modelsDir, resolved.logsDir};
     for (const QString &path : dirs) {
         QDir dir(path);
@@ -108,9 +394,7 @@ QList<LlamaCppLocalModel> ManagedLlamaCppRuntime::listLocalModels(const LlmConfi
     }
 
     const QDir modelsDir(resolved.modelsDir);
-    const QStringList files = modelsDir.entryList(QStringList({QStringLiteral("*.gguf")}),
-                                                  QDir::Files,
-                                                  QDir::Name | QDir::IgnoreCase);
+    const QStringList files = localModelFiles(resolved.modelsDir);
 
     QList<LlamaCppLocalModel> models;
     models.reserve(files.size());
@@ -154,6 +438,12 @@ bool ManagedLlamaCppRuntime::ensureRunning(LlmConfig *config, QString *errorMess
     config->llamaCppRuntimeRoot = layout.rootDir;
     config->llamaCppExecutablePath = executablePath;
     config->llamaCppModelPath = modelPath;
+    config->resolvedRuntimeRoot = layout.rootDir;
+    config->resolvedModelPath = modelPath;
+    config->localModelCount = layout.modelCount;
+    config->providerAvailable = layout.available;
+    config->providerAvailabilityStatus = layout.availabilityStatus;
+    config->providerAvailabilityMessage = layout.availabilityMessage;
     const QString resolvedModelId = QFileInfo(modelPath).completeBaseName();
     if (config->model.trimmed().isEmpty() && !resolvedModelId.isEmpty()) {
         config->model = resolvedModelId;

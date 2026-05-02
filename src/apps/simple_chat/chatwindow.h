@@ -15,7 +15,9 @@ class QObject;
 class QEvent;
 
 namespace qtllm {
-class QtLLMClient;
+namespace host {
+class RuntimeFacade;
+}
 }
 
 class ChatWindow : public QWidget
@@ -48,7 +50,7 @@ private:
     QTextEdit *m_output;
     QLineEdit *m_input;
     QPushButton *m_sendButton;
-    qtllm::QtLLMClient *m_client;
+    qtllm::host::RuntimeFacade *m_runtime;
     QNetworkAccessManager *m_networkManager;
     QPointer<QNetworkReply> m_modelsReply;
     bool m_reasoningVisible = false;

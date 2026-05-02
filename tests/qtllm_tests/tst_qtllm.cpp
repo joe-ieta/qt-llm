@@ -165,7 +165,7 @@ void QtLlmCoreTests::compactIdValidatesAndDecodes()
 {
     const quint64 orderValue = 0x123456789ABCDULL;
     const QString composed = identity::composeId(QStringLiteral("req"), orderValue);
-    QCOMPARE(composed, QStringLiteral("req_000938NKRKAYD"));
+    QCOMPARE(composed, QStringLiteral("req_000938nkrkayd"));
     QVERIFY(identity::isValidId(composed));
     QVERIFY(identity::hasIdPrefix(composed, QStringLiteral("req")));
 
@@ -173,12 +173,12 @@ void QtLlmCoreTests::compactIdValidatesAndDecodes()
     QCOMPARE(identity::decodeIdOrder(composed, &ok), orderValue);
     QVERIFY(ok);
 
-    const QString ambiguous = QStringLiteral("req_04HMASW9NF6YD");
-    QCOMPARE(identity::decodeIdOrder(ambiguous, &ok), orderValue);
+    const QString uppercase = QStringLiteral("req_000938NKRKAYD");
+    QCOMPARE(identity::decodeIdOrder(uppercase, &ok), orderValue);
     QVERIFY(ok);
 
-    const QString ambiguousLetters = QStringLiteral("req_04HMASW9NF6Yi");
-    QCOMPARE(identity::decodeIdOrder(ambiguousLetters, &ok), orderValue);
+    const QString ambiguousLetters = QStringLiteral("req_ooooooooooooi");
+    QCOMPARE(identity::decodeIdOrder(ambiguousLetters, &ok), 1ULL);
     QVERIFY(ok);
 }
 

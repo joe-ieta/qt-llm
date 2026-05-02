@@ -63,6 +63,23 @@ The intended usage style is simple:
 
 The design goal is to make code-level integration concise and practical for Qt developers.
 
+## Host App Integration Constraint
+
+External Qt applications should integrate through the narrow public layers owned
+by `qtllm`, not by recreating provider and runtime details in the Host App.
+
+- use `qtllm::host::RuntimeFacade` for simple Host App model calls and local
+  model discovery
+- use `QtLLMClient` for advanced request execution inside `qtllm` or when the
+  Host App intentionally owns lower-level runtime details
+- use `ConversationClient` for sessions, history, profile, and persistence
+- use `ToolEnabledChatEntry` for tool calling and MCP-backed flows
+
+Normal Host Apps should not directly depend on `ProviderFactory`,
+`HttpExecutor`, or `ManagedLlamaCppRuntime` for model calls. The canonical
+integration rules live in
+[docs/HOST_APP_INTEGRATION.md](./docs/HOST_APP_INTEGRATION.md).
+
 ## Monitoring, Tracing, and Analysis
 
 A major feature of the project is that it does not stop at request execution.

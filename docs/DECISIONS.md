@@ -51,3 +51,23 @@ Therefore the identity redesign is constrained as follows:
 - perform identity changes behind current API boundaries
 
 Internal persistence, runtime layout, and SQLite schemas are allowed to change when documented.
+
+## Decision 9: external Host Apps integrate through stable qtllm facades
+
+External Qt applications should not rebuild normal model-call plumbing around
+`ProviderFactory`, `HttpExecutor`, or `ManagedLlamaCppRuntime`.
+
+The default Host App path is:
+
+- `qtllm::host::RuntimeFacade` for simple request execution and local model
+  discovery
+- `QtLLMClient` as the internal core request engine and advanced API
+- `ConversationClient` for sessions, history, profile, and persistence
+- `ToolEnabledChatEntry` for tool calling and MCP-backed flows
+
+The mapping from Host App settings to `LlmConfig`, managed llama.cpp runtime
+startup, stream parsing, request tracing, cancellation, and provider lifecycle
+belong in `qt-llm`.
+
+The detailed rules live in
+[docs/HOST_APP_INTEGRATION.md](./HOST_APP_INTEGRATION.md).

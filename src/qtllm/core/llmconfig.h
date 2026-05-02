@@ -18,6 +18,12 @@ struct LlmConfig
     QString llamaCppModelPath;
     QStringList llamaCppExtraArgs;
     bool stream = true;
+    bool providerAvailable = true;
+    QString providerAvailabilityStatus;
+    QString providerAvailabilityMessage;
+    QString resolvedRuntimeRoot;
+    QString resolvedModelPath;
+    int localModelCount = 0;
 
     int timeoutMs = 60000;
     int maxRetries = 0;

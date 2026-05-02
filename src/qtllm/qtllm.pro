@@ -22,6 +22,7 @@ INCLUDEPATH += \
     $$PWD/network \
     $$PWD/streaming \
     $$PWD/chat \
+    $$PWD/host \
     $$PWD/storage \
     $$PWD/profile \
     $$PWD/tools \
@@ -50,6 +51,10 @@ HEADERS += \
     chat/conversationsnapshot.h \
     chat/conversationclient.h \
     chat/conversationclientfactory.h \
+    host/runtimeprofile.h \
+    host/runtimeprofilemapper.h \
+    host/modelcatalogservice.h \
+    host/runtimefacade.h \
     storage/conversationrepository.h \
     profile/clientprofile.h \
     profile/memorypolicy.h \
@@ -113,6 +118,9 @@ SOURCES += \
     streaming/streamchunkparser.cpp \
     chat/conversationclient.cpp \
     chat/conversationclientfactory.cpp \
+    host/runtimeprofilemapper.cpp \
+    host/modelcatalogservice.cpp \
+    host/runtimefacade.cpp \
     storage/conversationrepository.cpp \
     tools/llmtoolregistry.cpp \
     tools/builtintools.cpp \

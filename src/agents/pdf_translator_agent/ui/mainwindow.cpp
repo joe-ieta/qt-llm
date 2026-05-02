@@ -1203,6 +1203,9 @@ void MainWindow::refreshLlamaCppModelList(QComboBox *modelCombo, const QString &
         m_statusLabel->setText(errorMessage);
         return;
     }
+    if (!layout.executableAvailable) {
+        m_statusLabel->setText(layout.availabilityMessage);
+    }
 
     for (const qtllm::runtime::LlamaCppLocalModel &model : models) {
         modelCombo->addItem(model.displayName, model.filePath);
@@ -1218,7 +1221,9 @@ void MainWindow::refreshLlamaCppModelList(QComboBox *modelCombo, const QString &
         modelCombo->setCurrentIndex(0);
     }
 
-    if (models.isEmpty()) {
+    if (!layout.executableAvailable) {
+        m_statusLabel->setText(layout.availabilityMessage);
+    } else if (models.isEmpty()) {
         m_statusLabel->setText(QStringLiteral("No GGUF models found in %1").arg(layout.modelsDir));
     } else {
         m_statusLabel->setText(QStringLiteral("Loaded %1 local GGUF model(s) from %2")
@@ -1250,6 +1255,11 @@ void MainWindow::applyLanguageDetectBinding()
         }
         if (!modelPath.isEmpty()) {
             endpoint.llmConfig.llamaCppModelPath = modelPath;
+        }
+        QString availabilityMessage;
+        qtllm::runtime::ManagedLlamaCppRuntime::updateRuntimeAvailability(&endpoint.llmConfig, nullptr, &availabilityMessage);
+        if (!endpoint.llmConfig.providerAvailable) {
+            m_statusLabel->setText(availabilityMessage);
         }
     }
     endpoint.llmConfig.stream = false;
@@ -1286,6 +1296,11 @@ void MainWindow::applyTranslateBinding()
         }
         if (!modelPath.isEmpty()) {
             endpoint.llmConfig.llamaCppModelPath = modelPath;
+        }
+        QString availabilityMessage;
+        qtllm::runtime::ManagedLlamaCppRuntime::updateRuntimeAvailability(&endpoint.llmConfig, nullptr, &availabilityMessage);
+        if (!endpoint.llmConfig.providerAvailable) {
+            m_statusLabel->setText(availabilityMessage);
         }
     }
     endpoint.llmConfig.stream = false;

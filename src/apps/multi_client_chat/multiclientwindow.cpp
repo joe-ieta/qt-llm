@@ -635,6 +635,14 @@ bool MultiClientWindow::applyConfigToActiveClient(bool showMessage)
         if (!modelPath.isEmpty()) {
             config.llamaCppModelPath = modelPath;
         }
+        QString availabilityMessage;
+        qtllm::runtime::ManagedLlamaCppRuntime::updateRuntimeAvailability(&config, nullptr, &availabilityMessage);
+        if (!config.providerAvailable) {
+            if (showMessage) {
+                m_output->append(QStringLiteral("[config] ") + availabilityMessage);
+            }
+            return false;
+        }
     }
 
     client->setConfig(config);
@@ -670,6 +678,9 @@ void MultiClientWindow::refreshModels()
             m_modelCombo->clear();
             m_output->append(QStringLiteral("[models] ") + errorMessage);
             return;
+        }
+        if (!layout.executableAvailable) {
+            m_output->append(QStringLiteral("[models] ") + layout.availabilityMessage);
         }
         m_modelCombo->clear();
         for (const qtllm::runtime::LlamaCppLocalModel &model : models) {
