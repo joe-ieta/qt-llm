@@ -93,7 +93,7 @@ bool LlmToolRegistry::unregisterTool(const QString &toolId)
         return false;
     }
 
-    const bool removed = (m_tools.remove(id) > 0);
+    const bool removed = m_tools.remove(id);
     logging::QtLlmLogger::instance().info(QStringLiteral("tool.registry"),
                                           removed
                                               ? QStringLiteral("Tool removed")

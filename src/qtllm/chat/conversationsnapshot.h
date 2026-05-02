@@ -8,6 +8,7 @@
 #include <QDateTime>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QJsonValue>
 #include <QString>
 #include <QVector>
 
@@ -128,10 +129,20 @@ struct ConversationSnapshot
         configObject.insert(QStringLiteral("apiKey"), config.apiKey);
         configObject.insert(QStringLiteral("model"), config.model);
         configObject.insert(QStringLiteral("modelVendor"), config.modelVendor);
+        configObject.insert(QStringLiteral("runtimeName"), config.runtimeName);
+        configObject.insert(QStringLiteral("llamaCppRuntimeRoot"), config.llamaCppRuntimeRoot);
+        configObject.insert(QStringLiteral("llamaCppExecutablePath"), config.llamaCppExecutablePath);
+        configObject.insert(QStringLiteral("llamaCppModelPath"), config.llamaCppModelPath);
+        configObject.insert(QStringLiteral("llamaCppExtraArgs"), QJsonArray::fromStringList(config.llamaCppExtraArgs));
         configObject.insert(QStringLiteral("stream"), config.stream);
         configObject.insert(QStringLiteral("timeoutMs"), config.timeoutMs);
         configObject.insert(QStringLiteral("maxRetries"), config.maxRetries);
         configObject.insert(QStringLiteral("retryDelayMs"), config.retryDelayMs);
+        configObject.insert(QStringLiteral("llamaCppServerPort"), config.llamaCppServerPort);
+        configObject.insert(QStringLiteral("llamaCppContextSize"), config.llamaCppContextSize);
+        configObject.insert(QStringLiteral("llamaCppGpuLayers"), config.llamaCppGpuLayers);
+        configObject.insert(QStringLiteral("llamaCppThreadCount"), config.llamaCppThreadCount);
+        configObject.insert(QStringLiteral("llamaCppStartupTimeoutMs"), config.llamaCppStartupTimeoutMs);
         root.insert(QStringLiteral("config"), configObject);
 
         root.insert(QStringLiteral("profile"), profile.toJson());
@@ -157,10 +168,26 @@ struct ConversationSnapshot
         snapshot.config.apiKey = configObject.value(QStringLiteral("apiKey")).toString();
         snapshot.config.model = configObject.value(QStringLiteral("model")).toString();
         snapshot.config.modelVendor = configObject.value(QStringLiteral("modelVendor")).toString();
+        snapshot.config.runtimeName = configObject.value(QStringLiteral("runtimeName")).toString();
+        snapshot.config.llamaCppRuntimeRoot = configObject.value(QStringLiteral("llamaCppRuntimeRoot")).toString();
+        snapshot.config.llamaCppExecutablePath = configObject.value(QStringLiteral("llamaCppExecutablePath")).toString();
+        snapshot.config.llamaCppModelPath = configObject.value(QStringLiteral("llamaCppModelPath")).toString();
+        const QJsonArray llamaCppExtraArgs = configObject.value(QStringLiteral("llamaCppExtraArgs")).toArray();
+        for (const QJsonValue &value : llamaCppExtraArgs) {
+            const QString arg = value.toString();
+            if (!arg.isEmpty()) {
+                snapshot.config.llamaCppExtraArgs.append(arg);
+            }
+        }
         snapshot.config.stream = configObject.value(QStringLiteral("stream")).toBool(snapshot.config.stream);
         snapshot.config.timeoutMs = configObject.value(QStringLiteral("timeoutMs")).toInt(snapshot.config.timeoutMs);
         snapshot.config.maxRetries = configObject.value(QStringLiteral("maxRetries")).toInt(snapshot.config.maxRetries);
         snapshot.config.retryDelayMs = configObject.value(QStringLiteral("retryDelayMs")).toInt(snapshot.config.retryDelayMs);
+        snapshot.config.llamaCppServerPort = configObject.value(QStringLiteral("llamaCppServerPort")).toInt(snapshot.config.llamaCppServerPort);
+        snapshot.config.llamaCppContextSize = configObject.value(QStringLiteral("llamaCppContextSize")).toInt(snapshot.config.llamaCppContextSize);
+        snapshot.config.llamaCppGpuLayers = configObject.value(QStringLiteral("llamaCppGpuLayers")).toInt(snapshot.config.llamaCppGpuLayers);
+        snapshot.config.llamaCppThreadCount = configObject.value(QStringLiteral("llamaCppThreadCount")).toInt(snapshot.config.llamaCppThreadCount);
+        snapshot.config.llamaCppStartupTimeoutMs = configObject.value(QStringLiteral("llamaCppStartupTimeoutMs")).toInt(snapshot.config.llamaCppStartupTimeoutMs);
 
         snapshot.profile = profile::ClientProfile::fromJson(root.value(QStringLiteral("profile")).toObject());
         snapshot.activeSessionId = root.value(QStringLiteral("activeSessionId")).toString();

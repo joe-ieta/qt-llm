@@ -6,7 +6,10 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QMetaObject>
 #include <QThread>
+
+#include <functional>
 
 namespace pdftranslator::pipeline {
 
@@ -14,8 +17,14 @@ namespace {
 
 class BatchTranslationWorker : public QObject
 {
-    Q_OBJECT
 public:
+    using ProgressHandler = std::function<void(const QString &, const pdftranslator::domain::DocumentTranslationTask &)>;
+    using FinishedHandler = std::function<void(const QString &,
+                                               const pdftranslator::domain::DocumentTranslationTask &,
+                                               const QString &,
+                                               const QString &,
+                                               const QString &)>;
+
     BatchTranslationWorker(QString queueId,
                            QString pdfPath,
                            std::shared_ptr<skills::SkillRegistry> skillRegistry,
@@ -27,25 +36,29 @@ public:
     {
     }
 
-signals:
-    void progress(const QString &queueId,
-                  const pdftranslator::domain::DocumentTranslationTask &task);
-    void finished(const QString &queueId,
-                  const pdftranslator::domain::DocumentTranslationTask &task,
-                  const QString &extractedText,
-                  const QString &translatedText,
-                  const QString &errorMessage);
+    void setProgressHandler(ProgressHandler handler)
+    {
+        m_progressHandler = std::move(handler);
+    }
 
-public slots:
+    void setFinishedHandler(FinishedHandler handler)
+    {
+        m_finishedHandler = std::move(handler);
+    }
+
     void run()
     {
         DocumentWorkflowController controller(m_skillRegistry, m_modelRouter);
         const DocumentWorkflowRunResult result = controller.runSingleDocumentTranslation(
             m_pdfPath,
             [this](const pdftranslator::domain::DocumentTranslationTask &task) {
-                emit progress(m_queueId, task);
+                if (m_progressHandler) {
+                    m_progressHandler(m_queueId, task);
+                }
             });
-        emit finished(m_queueId, result.task, result.extractedText, result.translatedText, result.errorMessage);
+        if (m_finishedHandler) {
+            m_finishedHandler(m_queueId, result.task, result.extractedText, result.translatedText, result.errorMessage);
+        }
     }
 
 private:
@@ -53,6 +66,8 @@ private:
     QString m_pdfPath;
     std::shared_ptr<skills::SkillRegistry> m_skillRegistry;
     std::shared_ptr<skills::ModelRouter> m_modelRouter;
+    ProgressHandler m_progressHandler;
+    FinishedHandler m_finishedHandler;
 };
 
 } // namespace
@@ -263,8 +278,9 @@ void BatchTranslationQueueController::startQueuedJobs()
         worker->moveToThread(thread);
 
         connect(thread, &QThread::started, worker, &BatchTranslationWorker::run);
-        connect(worker, &BatchTranslationWorker::progress, this,
-                [this](const QString &queueId, const pdftranslator::domain::DocumentTranslationTask &task) {
+        worker->setProgressHandler([this](const QString &queueId, const pdftranslator::domain::DocumentTranslationTask &task) {
+            QMetaObject::invokeMethod(this,
+                [this, queueId, task]() {
                     for (BatchQueueEntry &entry : m_entries) {
                         if (entry.queueId == queueId) {
                             entry.task = task;
@@ -273,13 +289,16 @@ void BatchTranslationQueueController::startQueuedJobs()
                     }
                     emit taskProgressChanged(queueId, task);
                     emit queueChanged();
-                });
-        connect(worker, &BatchTranslationWorker::finished, this,
-                [this, worker, thread](const QString &queueId,
-                                       const pdftranslator::domain::DocumentTranslationTask &task,
-                                       const QString &extractedText,
-                                       const QString &translatedText,
-                                       const QString &errorMessage) {
+                },
+                Qt::QueuedConnection);
+        });
+        worker->setFinishedHandler([this, worker, thread](const QString &queueId,
+                                                          const pdftranslator::domain::DocumentTranslationTask &task,
+                                                          const QString &extractedText,
+                                                          const QString &translatedText,
+                                                          const QString &errorMessage) {
+            QMetaObject::invokeMethod(this,
+                [this, worker, thread, queueId, task, extractedText, translatedText, errorMessage]() {
                     for (BatchQueueEntry &entry : m_entries) {
                         if (entry.queueId == queueId) {
                             entry.task = task;
@@ -304,7 +323,9 @@ void BatchTranslationQueueController::startQueuedJobs()
                     thread->wait();
                     thread->deleteLater();
                     startQueuedJobs();
-                });
+                },
+                Qt::QueuedConnection);
+        });
 
         ActiveRun run;
         run.worker = worker;
@@ -316,5 +337,3 @@ void BatchTranslationQueueController::startQueuedJobs()
 }
 
 } // namespace pdftranslator::pipeline
-
-#include "batchtranslationqueuecontroller.moc"

@@ -76,6 +76,7 @@ private:
     void applyTranslateBinding();
     void applyPdfExtractBinding();
     void applyTermBaseBinding();
+    void refreshLlamaCppModelList(QComboBox *modelCombo, const QString &provider);
     QString defaultManifestPathForPdf(const QString &pdfPath) const;
     int selectedBatchRow() const;
 
@@ -92,13 +93,13 @@ private:
     QComboBox *m_providerCombo = nullptr;
     QLineEdit *m_baseUrlEdit = nullptr;
     QLineEdit *m_apiKeyEdit = nullptr;
-    QLineEdit *m_modelEdit = nullptr;
+    QComboBox *m_modelCombo = nullptr;
     QPushButton *m_testLanguageDetectEndpointButton = nullptr;
     QGroupBox *m_translateEndpointGroup = nullptr;
     QComboBox *m_translateProviderCombo = nullptr;
     QLineEdit *m_translateBaseUrlEdit = nullptr;
     QLineEdit *m_translateApiKeyEdit = nullptr;
-    QLineEdit *m_translateModelEdit = nullptr;
+    QComboBox *m_translateModelCombo = nullptr;
     QPushButton *m_testTranslateEndpointButton = nullptr;
     QGroupBox *m_extractMcpGroup = nullptr;
     QLineEdit *m_extractMcpServerIdEdit = nullptr;

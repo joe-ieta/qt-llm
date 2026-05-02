@@ -5,6 +5,7 @@
 #include "../../qtllm/logging/qtllmlogger.h"
 #include "../../qtllm/logging/signallogsink.h"
 #include "../../qtllm/logging/logtypes.h"
+#include "../../qtllm/runtime/managedllamacppruntime.h"
 #include "../../qtllm/tools/llmtooldefinition.h"
 #include "../../qtllm/tools/llmtoolregistry.h"
 #include "../../qtllm/tools/toolenabledchatentry.h"
@@ -20,6 +21,7 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
+#include <QList>
 #include <QListWidget>
 #include <QPushButton>
 #include <QSplitter>
@@ -36,6 +38,9 @@ namespace {
 QString defaultBaseUrlForProvider(const QString &provider)
 {
     const QString normalized = provider.trimmed().toLower();
+    if (qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(normalized)) {
+        return qtllm::runtime::ManagedLlamaCppRuntime::defaultBaseUrl();
+    }
     if (normalized == QStringLiteral("ollama")) {
         return QStringLiteral("http://127.0.0.1:11434/v1");
     }
@@ -48,6 +53,15 @@ QString defaultBaseUrlForProvider(const QString &provider)
 QString jsonToCompactText(const QJsonObject &object)
 {
     return QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact));
+}
+
+QString selectedModelPath(QComboBox *combo)
+{
+    if (!combo) {
+        return {};
+    }
+    const int index = combo->findText(combo->currentText().trimmed());
+    return index >= 0 ? combo->itemData(index).toString() : QString();
 }
 
 QString maskSecret(const QString &value)
@@ -163,7 +177,7 @@ McpChatWindow::McpChatWindow(std::shared_ptr<qtllm::tools::mcp::McpServerManager
     , m_providerCombo(new QComboBox(this))
     , m_baseUrlEdit(new QLineEdit(this))
     , m_apiKeyEdit(new QLineEdit(this))
-    , m_modelEdit(new QLineEdit(this))
+    , m_modelCombo(new QComboBox(this))
     , m_applyConfigButton(new QPushButton(QStringLiteral("Apply Config"), this))
     , m_syncToolsButton(new QPushButton(QStringLiteral("Reload MCP Tools"), this))
     , m_toolCountLabel(new QLabel(this))
@@ -192,13 +206,18 @@ McpChatWindow::McpChatWindow(std::shared_ptr<qtllm::tools::mcp::McpServerManager
     connect(m_logSink.get(), &qtllm::logging::SignalLogSink::logEventReceived,
             this, &McpChatWindow::onLogEventReceived);
 
+    m_providerCombo->addItem(QStringLiteral("llama-cpp"));
     m_providerCombo->addItem(QStringLiteral("ollama"));
     m_providerCombo->addItem(QStringLiteral("openai-compatible"));
     m_providerCombo->addItem(QStringLiteral("vllm"));
     m_providerCombo->addItem(QStringLiteral("openai"));
     m_baseUrlEdit->setText(defaultBaseUrlForProvider(m_providerCombo->currentText()));
     m_apiKeyEdit->setEchoMode(QLineEdit::Password);
-    m_modelEdit->setPlaceholderText(QStringLiteral("Model name"));
+    m_modelCombo->setEditable(true);
+    m_modelCombo->setInsertPolicy(QComboBox::NoInsert);
+    if (m_modelCombo->lineEdit()) {
+        m_modelCombo->lineEdit()->setPlaceholderText(QStringLiteral("Model name"));
+    }
     m_inputEdit->setPlaceholderText(QStringLiteral("Enter a message that should trigger one of the MCP tools"));
 
     m_allToolsView->setReadOnly(true);
@@ -218,7 +237,7 @@ McpChatWindow::McpChatWindow(std::shared_ptr<qtllm::tools::mcp::McpServerManager
     configForm->addRow(QStringLiteral("Provider"), m_providerCombo);
     configForm->addRow(QStringLiteral("Base URL"), m_baseUrlEdit);
     configForm->addRow(QStringLiteral("API Key"), m_apiKeyEdit);
-    configForm->addRow(QStringLiteral("Model"), m_modelEdit);
+    configForm->addRow(QStringLiteral("Model"), m_modelCombo);
 
     auto *configButtons = new QHBoxLayout();
     configButtons->addWidget(m_applyConfigButton);
@@ -326,6 +345,7 @@ McpChatWindow::McpChatWindow(std::shared_ptr<qtllm::tools::mcp::McpServerManager
             [this](int) {
                 const QString provider = m_providerCombo->currentText();
                 m_baseUrlEdit->setText(defaultBaseUrlForProvider(provider));
+                refreshLocalModelList();
                 logInfo(QStringLiteral("ui.mcp.chat"),
                         QStringLiteral("Provider selection changed"),
                         QJsonObject{{QStringLiteral("provider"), provider},
@@ -368,6 +388,7 @@ McpChatWindow::McpChatWindow(std::shared_ptr<qtllm::tools::mcp::McpServerManager
             this,
             &McpChatWindow::onChatError);
 
+    refreshLocalModelList();
     applyChatConfig(false);
     reloadRegisteredServers();
 }
@@ -590,11 +611,18 @@ bool McpChatWindow::applyChatConfig(bool logResult)
 
     const QString provider = m_providerCombo->currentText().trimmed().toLower();
     QString baseUrl = m_baseUrlEdit->text().trimmed();
-    const QString model = m_modelEdit->text().trimmed();
+    QString model = m_modelCombo->currentText().trimmed();
+    QString modelPath = selectedModelPath(m_modelCombo);
 
     if (baseUrl.isEmpty()) {
         baseUrl = defaultBaseUrlForProvider(provider);
         m_baseUrlEdit->setText(baseUrl);
+    }
+
+    if (model.isEmpty() && qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(provider)) {
+        refreshLocalModelList();
+        model = m_modelCombo->currentText().trimmed();
+        modelPath = selectedModelPath(m_modelCombo);
     }
 
     if (model.isEmpty()) {
@@ -610,6 +638,12 @@ bool McpChatWindow::applyChatConfig(bool logResult)
     config.apiKey = m_apiKeyEdit->text().trimmed();
     config.model = model;
     config.stream = true;
+    if (qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(provider)) {
+        config.runtimeName = QStringLiteral("llama-cpp-managed");
+        if (!modelPath.isEmpty()) {
+            config.llamaCppModelPath = modelPath;
+        }
+    }
 
     m_conversationClient->setConfig(config);
     if (!m_conversationClient->setProviderByName(provider)) {
@@ -638,6 +672,50 @@ bool McpChatWindow::applyChatConfig(bool logResult)
     }
 
     return true;
+}
+
+void McpChatWindow::refreshLocalModelList()
+{
+    const QString provider = m_providerCombo->currentText().trimmed();
+    if (!qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(provider)) {
+        return;
+    }
+
+    const QString previousModel = m_modelCombo->currentText();
+    const QString previousModelPath = m_modelCombo->currentData().toString();
+
+    qtllm::LlmConfig config;
+    config.providerName = provider;
+
+    qtllm::runtime::LlamaCppRuntimeLayout layout;
+    QString errorMessage;
+    const QList<qtllm::runtime::LlamaCppLocalModel> models =
+        qtllm::runtime::ManagedLlamaCppRuntime::listLocalModels(config, &layout, &errorMessage);
+
+    m_modelCombo->clear();
+    if (!errorMessage.isEmpty()) {
+        logWarn(QStringLiteral("ui.mcp.chat"), errorMessage);
+        return;
+    }
+
+    for (const qtllm::runtime::LlamaCppLocalModel &model : models) {
+        m_modelCombo->addItem(model.displayName, model.filePath);
+    }
+
+    int previousIndex = previousModelPath.isEmpty() ? -1 : m_modelCombo->findData(previousModelPath);
+    if (previousIndex < 0) {
+        previousIndex = m_modelCombo->findText(previousModel);
+    }
+    if (previousIndex >= 0) {
+        m_modelCombo->setCurrentIndex(previousIndex);
+    } else if (m_modelCombo->count() > 0) {
+        m_modelCombo->setCurrentIndex(0);
+    }
+
+    logInfo(QStringLiteral("ui.mcp.chat"),
+            QStringLiteral("Local llama.cpp model list refreshed"),
+            QJsonObject{{QStringLiteral("modelsDir"), layout.modelsDir},
+                        {QStringLiteral("modelCount"), m_modelCombo->count()}});
 }
 
 void McpChatWindow::syncRegisteredTools()

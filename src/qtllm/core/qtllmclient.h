@@ -12,6 +12,10 @@ class ILLMProvider;
 class HttpExecutor;
 class StreamChunkParser;
 
+namespace runtime {
+class ManagedLlamaCppRuntime;
+}
+
 namespace tools::runtime {
 class ToolCallOrchestrator;
 }
@@ -45,10 +49,12 @@ signals:
 private:
     void wireExecutor();
     void dispatchRequest(const LlmRequest &request);
+    bool ensureManagedRuntime();
 
 private:
     LlmConfig m_config;
     std::unique_ptr<ILLMProvider> m_provider;
+    std::unique_ptr<runtime::ManagedLlamaCppRuntime> m_llamaCppRuntime;
     HttpExecutor *m_executor;
     std::unique_ptr<StreamChunkParser> m_streamParser;
     QString m_accumulatedText;

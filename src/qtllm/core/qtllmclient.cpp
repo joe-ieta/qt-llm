@@ -5,6 +5,7 @@
 #include "../network/httpexecutor.h"
 #include "../providers/illmprovider.h"
 #include "../providers/providerfactory.h"
+#include "../runtime/managedllamacppruntime.h"
 #include "../streaming/streamchunkparser.h"
 #include "../tools/runtime/toolcallorchestrator.h"
 #include "../tools/runtime/toolruntime_types.h"
@@ -127,6 +128,10 @@ void QtLLMClient::sendRequest(const LlmRequest &request)
         }
     }
 
+    if (!ensureManagedRuntime()) {
+        return;
+    }
+
     dispatchRequest(request);
 }
 
@@ -188,6 +193,34 @@ void QtLLMClient::dispatchRequest(const LlmRequest &request)
     options.retryDelayMs = m_config.retryDelayMs;
 
     m_executor->post(networkRequest, payload, options);
+}
+
+bool QtLLMClient::ensureManagedRuntime()
+{
+    if (!runtime::ManagedLlamaCppRuntime::isManagedProvider(m_config.providerName)) {
+        return true;
+    }
+
+    if (!m_llamaCppRuntime) {
+        m_llamaCppRuntime = std::make_unique<runtime::ManagedLlamaCppRuntime>(this);
+    }
+
+    QString errorMessage;
+    LlmConfig runtimeConfig = m_config;
+    if (!m_llamaCppRuntime->ensureRunning(&runtimeConfig, &errorMessage)) {
+        logging::QtLlmLogger::instance().error(QStringLiteral("llm.runtime"),
+                                               QStringLiteral("Managed llama.cpp runtime failed"),
+                                               logContext(m_toolLoopClientId, m_toolLoopSessionId, m_activeRequestId, m_toolLoopTraceId),
+                                               QJsonObject{{QStringLiteral("error"), errorMessage}});
+        emit errorOccurred(errorMessage);
+        return false;
+    }
+
+    m_config = runtimeConfig;
+    if (m_provider) {
+        m_provider->setConfig(m_config);
+    }
+    return true;
 }
 
 void QtLLMClient::wireExecutor()

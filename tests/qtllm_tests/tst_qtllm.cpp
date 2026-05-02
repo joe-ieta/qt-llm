@@ -329,6 +329,10 @@ void QtLlmCoreTests::providerFactoryCreatesKnownProviders()
     QVERIFY(vllm != nullptr);
     QCOMPARE(vllm->name(), QStringLiteral("vllm"));
 
+    std::unique_ptr<ILLMProvider> llamaCpp = ProviderFactory::create(QStringLiteral("llama-cpp"));
+    QVERIFY(llamaCpp != nullptr);
+    QCOMPARE(llamaCpp->name(), QStringLiteral("llama-cpp"));
+
     std::unique_ptr<ILLMProvider> openai = ProviderFactory::create(QStringLiteral("openai"));
     QVERIFY(openai != nullptr);
     QCOMPARE(openai->name(), QStringLiteral("openai"));

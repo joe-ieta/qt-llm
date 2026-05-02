@@ -3,10 +3,12 @@
 #include "../../qtllm/core/llmconfig.h"
 #include "../../qtllm/core/qtllmclient.h"
 #include "../../qtllm/providers/illmprovider.h"
+#include "../../qtllm/providers/llamacppprovider.h"
 #include "../../qtllm/providers/ollamaprovider.h"
 #include "../../qtllm/providers/openaiprovider.h"
 #include "../../qtllm/providers/openaicompatibleprovider.h"
 #include "../../qtllm/providers/vllmprovider.h"
+#include "../../qtllm/runtime/managedllamacppruntime.h"
 
 #include <QComboBox>
 #include <QEvent>
@@ -17,6 +19,7 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
+#include <QList>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -41,6 +44,7 @@ struct ProviderOption
 const QList<ProviderOption> &providerOptions()
 {
     static const QList<ProviderOption> options = {
+        {QStringLiteral("llama-cpp"), QStringLiteral("llama.cpp Local"), QStringLiteral("http://127.0.0.1:18080/v1"), false},
         {QStringLiteral("ollama"), QStringLiteral("Ollama"), QStringLiteral("http://127.0.0.1:11434/v1"), false},
         {QStringLiteral("vllm"), QStringLiteral("vLLM"), QStringLiteral("http://127.0.0.1:8000/v1"), false},
         {QStringLiteral("sglang"), QStringLiteral("SGLang"), QStringLiteral("http://127.0.0.1:30000/v1"), false},
@@ -63,6 +67,9 @@ const ProviderOption *findProviderOption(const QString &providerId)
 
 std::unique_ptr<qtllm::ILLMProvider> createProviderById(const QString &providerId)
 {
+    if (qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(providerId)) {
+        return std::make_unique<qtllm::LlamaCppProvider>();
+    }
     if (providerId == QStringLiteral("ollama")) {
         return std::make_unique<qtllm::OllamaProvider>();
     }
@@ -291,6 +298,13 @@ void ChatWindow::applyConfigToClient()
     config.apiKey = m_apiKeyEdit->text().trimmed();
     config.model = m_modelCombo->currentText().trimmed();
     config.stream = true;
+    if (qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(config.providerName)) {
+        config.runtimeName = QStringLiteral("llama-cpp-managed");
+        const QString modelPath = m_modelCombo->currentData().toString();
+        if (!modelPath.isEmpty()) {
+            config.llamaCppModelPath = modelPath;
+        }
+    }
 
     m_client->setConfig(config);
     m_client->setProvider(createProviderById(config.providerName));
@@ -361,6 +375,43 @@ void ChatWindow::refreshModels()
         m_modelCombo->clear();
         setStatusMessage(QStringLiteral("该提供商需要 API Key，填写后再加载模型"), true);
         m_sendButton->setEnabled(false);
+        return;
+    }
+
+    if (qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(providerId)) {
+        qtllm::runtime::LlamaCppRuntimeLayout layout;
+        QString errorMessage;
+        qtllm::LlmConfig config;
+        config.providerName = providerId;
+        const QString previousModel = m_modelCombo->currentText();
+        const QString previousModelPath = m_modelCombo->currentData().toString();
+        const QList<qtllm::runtime::LlamaCppLocalModel> models =
+            qtllm::runtime::ManagedLlamaCppRuntime::listLocalModels(config, &layout, &errorMessage);
+        if (!errorMessage.isEmpty()) {
+            setStatusMessage(errorMessage, true);
+            m_sendButton->setEnabled(false);
+            return;
+        }
+        m_modelCombo->clear();
+        for (const qtllm::runtime::LlamaCppLocalModel &model : models) {
+            m_modelCombo->addItem(model.displayName, model.filePath);
+        }
+        if (m_modelCombo->count() == 0) {
+            setStatusMessage(QStringLiteral("未找到 GGUF 模型，请将 .gguf 放入 %1").arg(layout.modelsDir), true);
+            m_sendButton->setEnabled(false);
+            return;
+        }
+        int previousIndex = previousModelPath.isEmpty() ? -1 : m_modelCombo->findData(previousModelPath);
+        if (previousIndex < 0) {
+            previousIndex = m_modelCombo->findText(previousModel);
+        }
+        m_modelCombo->setCurrentIndex(previousIndex >= 0 ? previousIndex : 0);
+        setStatusMessage(QStringLiteral("已加载 %1 个本地 GGUF 模型: %2")
+                             .arg(m_modelCombo->count())
+                             .arg(layout.modelsDir),
+                         false);
+        m_sendButton->setEnabled(true);
+        applyConfigToClient();
         return;
     }
 

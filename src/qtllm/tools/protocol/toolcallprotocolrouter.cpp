@@ -120,7 +120,8 @@ std::shared_ptr<IToolCallProtocolAdapter> ToolCallProtocolRouter::route(const QS
         return std::make_shared<VllmToolCallProtocolAdapter>();
     }
     if (provider == QStringLiteral("openai") || provider == QStringLiteral("openai-compatible")
-        || provider == QStringLiteral("sglang")) {
+        || provider == QStringLiteral("sglang") || provider == QStringLiteral("llama-cpp")
+        || provider == QStringLiteral("llamacpp") || provider == QStringLiteral("llama-cpp-local")) {
         return std::make_shared<OpenAIToolCallProtocolAdapter>();
     }
 

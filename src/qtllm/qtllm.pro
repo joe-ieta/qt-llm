@@ -3,6 +3,8 @@ TARGET = qtllm
 CONFIG += c++17 warn_on staticlib create_prl
 QT += core network sql
 
+msvc:QMAKE_CXXFLAGS += /utf-8
+
 DEFINES += QTLLM_LIBRARY
 
 # Keep library output predictable across platforms and shadow builds.
@@ -16,6 +18,7 @@ INCLUDEPATH += \
     $$PWD/identity \
     $$PWD/core \
     $$PWD/providers \
+    $$PWD/runtime \
     $$PWD/network \
     $$PWD/streaming \
     $$PWD/chat \
@@ -35,11 +38,13 @@ HEADERS += \
     core/llmtypes.h \
     core/qtllmclient.h \
     providers/illmprovider.h \
+    providers/llamacppprovider.h \
     providers/openaiprovider.h \
     providers/openaicompatibleprovider.h \
     providers/ollamaprovider.h \
     providers/providerfactory.h \
     providers/vllmprovider.h \
+    runtime/managedllamacppruntime.h \
     network/httpexecutor.h \
     streaming/streamchunkparser.h \
     chat/conversationsnapshot.h \
@@ -97,11 +102,13 @@ HEADERS += \
 SOURCES += \
     identity/compactid.cpp \
     core/qtllmclient.cpp \
+    providers/llamacppprovider.cpp \
     providers/openaiprovider.cpp \
     providers/openaicompatibleprovider.cpp \
     providers/ollamaprovider.cpp \
     providers/providerfactory.cpp \
     providers/vllmprovider.cpp \
+    runtime/managedllamacppruntime.cpp \
     network/httpexecutor.cpp \
     streaming/streamchunkparser.cpp \
     chat/conversationclient.cpp \

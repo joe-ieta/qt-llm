@@ -72,6 +72,7 @@ private:
     void renderAllTools();
     void appendChatLine(const QString &role, const QString &text);
     void appendRuntimeLog(const QString &line);
+    void refreshLocalModelList();
     bool shouldDisplayLogEvent(const qtllm::logging::LogEvent &event) const;
     void logInfo(const QString &category, const QString &message, const QJsonObject &fields = QJsonObject()) const;
     void logWarn(const QString &category, const QString &message, const QJsonObject &fields = QJsonObject()) const;
@@ -91,7 +92,7 @@ private:
     QComboBox *m_providerCombo;
     QLineEdit *m_baseUrlEdit;
     QLineEdit *m_apiKeyEdit;
-    QLineEdit *m_modelEdit;
+    QComboBox *m_modelCombo;
     QPushButton *m_applyConfigButton;
     QPushButton *m_syncToolsButton;
     QLabel *m_toolCountLabel;

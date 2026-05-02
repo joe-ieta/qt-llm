@@ -9,10 +9,12 @@
 #include "../../qtllm/logging/signallogsink.h"
 #include "../../qtllm/profile/clientprofile.h"
 #include "../../qtllm/providers/illmprovider.h"
+#include "../../qtllm/providers/llamacppprovider.h"
 #include "../../qtllm/providers/ollamaprovider.h"
 #include "../../qtllm/providers/openaiprovider.h"
 #include "../../qtllm/providers/openaicompatibleprovider.h"
 #include "../../qtllm/providers/vllmprovider.h"
+#include "../../qtllm/runtime/managedllamacppruntime.h"
 #include "../../qtllm/storage/conversationrepository.h"
 #include "../../qtllm/tools/builtintools.h"
 #include "../../qtllm/tools/llmtoolregistry.h"
@@ -62,6 +64,7 @@ struct ProviderOption
 const QList<ProviderOption> &providerOptions()
 {
     static const QList<ProviderOption> options = {
+        {QStringLiteral("llama-cpp"), QStringLiteral("llama.cpp Local"), QStringLiteral("http://127.0.0.1:18080/v1"), false},
         {QStringLiteral("ollama"), QStringLiteral("Ollama"), QStringLiteral("http://127.0.0.1:11434/v1"), false},
         {QStringLiteral("vllm"), QStringLiteral("vLLM"), QStringLiteral("http://127.0.0.1:8000/v1"), false},
         {QStringLiteral("sglang"), QStringLiteral("SGLang"), QStringLiteral("http://127.0.0.1:30000/v1"), false},
@@ -84,6 +87,9 @@ const ProviderOption *findProviderOption(const QString &providerId)
 
 std::unique_ptr<qtllm::ILLMProvider> createProviderById(const QString &providerId)
 {
+    if (qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(providerId)) {
+        return std::make_unique<qtllm::LlamaCppProvider>();
+    }
     if (providerId == QStringLiteral("ollama")) {
         return std::make_unique<qtllm::OllamaProvider>();
     }
@@ -623,6 +629,13 @@ bool MultiClientWindow::applyConfigToActiveClient(bool showMessage)
     config.apiKey = apiKey;
     config.model = modelId;
     config.stream = true;
+    if (qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(config.providerName)) {
+        config.runtimeName = QStringLiteral("llama-cpp-managed");
+        const QString modelPath = m_modelCombo->currentData().toString();
+        if (!modelPath.isEmpty()) {
+            config.llamaCppModelPath = modelPath;
+        }
+    }
 
     client->setConfig(config);
     client->setProvider(createProviderById(providerId));
@@ -641,6 +654,39 @@ void MultiClientWindow::refreshModels()
     if (option->apiKeyRequired && m_apiKeyEdit->text().trimmed().isEmpty()) {
         m_modelCombo->clear();
         m_output->append(QStringLiteral("[models] This provider requires API Key before refreshing models"));
+        return;
+    }
+
+    if (qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(providerId)) {
+        qtllm::runtime::LlamaCppRuntimeLayout layout;
+        QString errorMessage;
+        qtllm::LlmConfig config;
+        config.providerName = providerId;
+        const QString previousModel = m_modelCombo->currentText();
+        const QString previousModelPath = m_modelCombo->currentData().toString();
+        const QList<qtllm::runtime::LlamaCppLocalModel> models =
+            qtllm::runtime::ManagedLlamaCppRuntime::listLocalModels(config, &layout, &errorMessage);
+        if (!errorMessage.isEmpty()) {
+            m_modelCombo->clear();
+            m_output->append(QStringLiteral("[models] ") + errorMessage);
+            return;
+        }
+        m_modelCombo->clear();
+        for (const qtllm::runtime::LlamaCppLocalModel &model : models) {
+            m_modelCombo->addItem(model.displayName, model.filePath);
+        }
+        if (m_modelCombo->count() == 0) {
+            m_output->append(QStringLiteral("[models] No GGUF models found in ") + layout.modelsDir);
+            return;
+        }
+        int previousIndex = previousModelPath.isEmpty() ? -1 : m_modelCombo->findData(previousModelPath);
+        if (previousIndex < 0) {
+            previousIndex = m_modelCombo->findText(previousModel);
+        }
+        m_modelCombo->setCurrentIndex(previousIndex >= 0 ? previousIndex : 0);
+        m_output->append(QStringLiteral("[models] Loaded %1 local GGUF model(s) from %2")
+                             .arg(m_modelCombo->count())
+                             .arg(layout.modelsDir));
         return;
     }
 

@@ -105,6 +105,14 @@ client->setProviderByName(QStringLiteral("openai-compatible"));
 
 - 显式保留的 Ollama Provider 入口
 
+### `LlamaCppProvider`
+
+定位：
+
+- 面向项目托管的本地 `llama-server`
+- 协议仍走 OpenAI-compatible `/v1/chat/completions`
+- 默认运行态目录为应用目录下的 `llama-cpp-runtime/`
+
 ### `VllmProvider`
 
 定位：

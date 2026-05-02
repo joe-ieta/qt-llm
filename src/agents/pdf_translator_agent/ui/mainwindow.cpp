@@ -12,6 +12,7 @@
 #include "../../../qtllm/identity/compactid.h"
 #include "../../../qtllm/core/llmtypes.h"
 #include "../../../qtllm/core/qtllmclient.h"
+#include "../../../qtllm/runtime/managedllamacppruntime.h"
 
 #include <QApplication>
 #include <QComboBox>
@@ -29,6 +30,7 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
+#include <QList>
 #include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
@@ -51,6 +53,9 @@ namespace {
 QString defaultBaseUrlForProvider(const QString &provider)
 {
     const QString normalized = provider.trimmed().toLower();
+    if (qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(normalized)) {
+        return qtllm::runtime::ManagedLlamaCppRuntime::defaultBaseUrl();
+    }
     if (normalized == QStringLiteral("ollama")) {
         return QStringLiteral("http://127.0.0.1:11434/v1");
     }
@@ -66,6 +71,15 @@ QString defaultBaseUrlForProvider(const QString &provider)
 QString compactJson(const QJsonObject &object)
 {
     return QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Indented));
+}
+
+QString selectedModelPath(QComboBox *combo)
+{
+    if (!combo) {
+        return {};
+    }
+    const int index = combo->findText(combo->currentText().trimmed());
+    return index >= 0 ? combo->itemData(index).toString() : QString();
 }
 
 QString htmlEscaped(const QString &text)
@@ -718,6 +732,7 @@ void MainWindow::buildUi()
     m_endpointGroup = new QGroupBox(QStringLiteral("Language-Detect Skill Endpoint"), this);
     m_providerCombo = new QComboBox(this);
     m_providerCombo->addItems(QStringList({
+        QStringLiteral("llama-cpp"),
         QStringLiteral("ollama"),
         QStringLiteral("openai-compatible"),
         QStringLiteral("vllm"),
@@ -728,14 +743,18 @@ void MainWindow::buildUi()
     m_apiKeyEdit = new QLineEdit(this);
     m_apiKeyEdit->setEchoMode(QLineEdit::Password);
     m_apiKeyEdit->setPlaceholderText(QStringLiteral("Optional for local/openai-compatible endpoints"));
-    m_modelEdit = new QLineEdit(this);
-    m_modelEdit->setPlaceholderText(QStringLiteral("Bind a lightweight model for language-detect fallback"));
+    m_modelCombo = new QComboBox(this);
+    m_modelCombo->setEditable(true);
+    m_modelCombo->setInsertPolicy(QComboBox::NoInsert);
+    if (m_modelCombo->lineEdit()) {
+        m_modelCombo->lineEdit()->setPlaceholderText(QStringLiteral("Bind a lightweight model for language-detect fallback"));
+    }
 
     auto *endpointForm = new QFormLayout();
     endpointForm->addRow(QStringLiteral("Provider"), m_providerCombo);
     endpointForm->addRow(QStringLiteral("Base URL"), m_baseUrlEdit);
     endpointForm->addRow(QStringLiteral("API Key"), m_apiKeyEdit);
-    endpointForm->addRow(QStringLiteral("Model"), m_modelEdit);
+    endpointForm->addRow(QStringLiteral("Model"), m_modelCombo);
     m_testLanguageDetectEndpointButton = new QPushButton(QStringLiteral("Test Language-Detect Endpoint"), this);
     connect(m_testLanguageDetectEndpointButton, &QPushButton::clicked, this, &MainWindow::onTestLanguageDetectEndpointClicked);
     endpointForm->addRow(QString(), m_testLanguageDetectEndpointButton);
@@ -743,6 +762,7 @@ void MainWindow::buildUi()
 
     connect(m_providerCombo, &QComboBox::currentTextChanged, this, [this](const QString &provider) {
         m_baseUrlEdit->setText(defaultBaseUrlForProvider(provider));
+        refreshLlamaCppModelList(m_modelCombo, provider);
     });
 
     m_inputEdit = new QPlainTextEdit(this);
@@ -818,6 +838,7 @@ void MainWindow::buildUi()
     m_translateEndpointGroup = new QGroupBox(QStringLiteral("Chunk-Translate Skill Endpoint"), this);
     m_translateProviderCombo = new QComboBox(this);
     m_translateProviderCombo->addItems(QStringList({
+        QStringLiteral("llama-cpp"),
         QStringLiteral("ollama"),
         QStringLiteral("openai-compatible"),
         QStringLiteral("vllm"),
@@ -827,14 +848,18 @@ void MainWindow::buildUi()
     m_translateApiKeyEdit = new QLineEdit(this);
     m_translateApiKeyEdit->setEchoMode(QLineEdit::Password);
     m_translateApiKeyEdit->setPlaceholderText(QStringLiteral("Optional for local/openai-compatible endpoints"));
-    m_translateModelEdit = new QLineEdit(this);
-    m_translateModelEdit->setPlaceholderText(QStringLiteral("Bind a translation model for chunk-translate"));
+    m_translateModelCombo = new QComboBox(this);
+    m_translateModelCombo->setEditable(true);
+    m_translateModelCombo->setInsertPolicy(QComboBox::NoInsert);
+    if (m_translateModelCombo->lineEdit()) {
+        m_translateModelCombo->lineEdit()->setPlaceholderText(QStringLiteral("Bind a translation model for chunk-translate"));
+    }
 
     auto *translateForm = new QFormLayout();
     translateForm->addRow(QStringLiteral("Provider"), m_translateProviderCombo);
     translateForm->addRow(QStringLiteral("Base URL"), m_translateBaseUrlEdit);
     translateForm->addRow(QStringLiteral("API Key"), m_translateApiKeyEdit);
-    translateForm->addRow(QStringLiteral("Model"), m_translateModelEdit);
+    translateForm->addRow(QStringLiteral("Model"), m_translateModelCombo);
     m_testTranslateEndpointButton = new QPushButton(QStringLiteral("Test Translate Endpoint"), this);
     connect(m_testTranslateEndpointButton, &QPushButton::clicked, this, &MainWindow::onTestTranslateEndpointClicked);
     translateForm->addRow(QString(), m_testTranslateEndpointButton);
@@ -842,6 +867,7 @@ void MainWindow::buildUi()
 
     connect(m_translateProviderCombo, &QComboBox::currentTextChanged, this, [this](const QString &provider) {
         m_translateBaseUrlEdit->setText(defaultBaseUrlForProvider(provider));
+        refreshLlamaCppModelList(m_translateModelCombo, provider);
     });
 
     m_extractMcpGroup = new QGroupBox(QStringLiteral("PDF Extract MCP Fallback"), this);
@@ -1026,7 +1052,8 @@ void MainWindow::loadUiState()
     m_providerCombo->setCurrentText(settings.value(QStringLiteral("fragment/languageDetectProvider"), m_providerCombo->currentText()).toString());
     m_baseUrlEdit->setText(settings.value(QStringLiteral("fragment/languageDetectBaseUrl"), m_baseUrlEdit->text()).toString());
     m_apiKeyEdit->setText(settings.value(QStringLiteral("fragment/languageDetectApiKey")).toString());
-    m_modelEdit->setText(settings.value(QStringLiteral("fragment/languageDetectModel")).toString());
+    m_modelCombo->setCurrentText(settings.value(QStringLiteral("fragment/languageDetectModel")).toString());
+    refreshLlamaCppModelList(m_modelCombo, m_providerCombo->currentText());
     m_fragmentTargetLanguageCombo->setCurrentIndex(settings.value(QStringLiteral("fragment/targetLanguageIndex"), 0).toInt());
     m_fragmentInstructionsEdit->setText(settings.value(QStringLiteral("fragment/instructions")).toString());
     m_inputEdit->setPlainText(settings.value(QStringLiteral("fragment/sourceText")).toString());
@@ -1049,7 +1076,8 @@ void MainWindow::loadUiState()
     m_translateProviderCombo->setCurrentText(settings.value(QStringLiteral("document/translateProvider"), m_translateProviderCombo->currentText()).toString());
     m_translateBaseUrlEdit->setText(settings.value(QStringLiteral("document/translateBaseUrl"), m_translateBaseUrlEdit->text()).toString());
     m_translateApiKeyEdit->setText(settings.value(QStringLiteral("document/translateApiKey")).toString());
-    m_translateModelEdit->setText(settings.value(QStringLiteral("document/translateModel")).toString());
+    m_translateModelCombo->setCurrentText(settings.value(QStringLiteral("document/translateModel")).toString());
+    refreshLlamaCppModelList(m_translateModelCombo, m_translateProviderCombo->currentText());
     m_batchConcurrencySpin->setValue(settings.value(QStringLiteral("batch/maxConcurrency"), m_batchConcurrencySpin->value()).toInt());
     if (m_batchQueueController) {
         const QJsonDocument batchEntriesDocument = QJsonDocument::fromJson(settings.value(QStringLiteral("batch/entries")).toByteArray());
@@ -1070,7 +1098,7 @@ void MainWindow::saveUiState() const
     settings.setValue(QStringLiteral("fragment/languageDetectProvider"), m_providerCombo->currentText());
     settings.setValue(QStringLiteral("fragment/languageDetectBaseUrl"), m_baseUrlEdit->text().trimmed());
     settings.setValue(QStringLiteral("fragment/languageDetectApiKey"), m_apiKeyEdit->text());
-    settings.setValue(QStringLiteral("fragment/languageDetectModel"), m_modelEdit->text().trimmed());
+    settings.setValue(QStringLiteral("fragment/languageDetectModel"), m_modelCombo->currentText().trimmed());
     settings.setValue(QStringLiteral("fragment/targetLanguageIndex"), m_fragmentTargetLanguageCombo->currentIndex());
     settings.setValue(QStringLiteral("fragment/instructions"), m_fragmentInstructionsEdit->text());
     settings.setValue(QStringLiteral("fragment/sourceText"), m_inputEdit->toPlainText());
@@ -1087,7 +1115,7 @@ void MainWindow::saveUiState() const
     settings.setValue(QStringLiteral("document/translateProvider"), m_translateProviderCombo->currentText());
     settings.setValue(QStringLiteral("document/translateBaseUrl"), m_translateBaseUrlEdit->text().trimmed());
     settings.setValue(QStringLiteral("document/translateApiKey"), m_translateApiKeyEdit->text());
-    settings.setValue(QStringLiteral("document/translateModel"), m_translateModelEdit->text().trimmed());
+    settings.setValue(QStringLiteral("document/translateModel"), m_translateModelCombo->currentText().trimmed());
     settings.setValue(QStringLiteral("batch/maxConcurrency"), m_batchConcurrencySpin->value());
     settings.setValue(QStringLiteral("batch/paused"), m_batchQueueController ? m_batchQueueController->isPaused() : false);
     settings.setValue(QStringLiteral("batch/entries"),
@@ -1103,7 +1131,7 @@ void MainWindow::connectPersistenceSignals()
     connect(m_providerCombo, &QComboBox::currentTextChanged, this, [this](const QString &) { saveUiState(); });
     connect(m_baseUrlEdit, &QLineEdit::textChanged, this, [this](const QString &) { saveUiState(); });
     connect(m_apiKeyEdit, &QLineEdit::textChanged, this, [this](const QString &) { saveUiState(); });
-    connect(m_modelEdit, &QLineEdit::textChanged, this, [this](const QString &) { saveUiState(); });
+    connect(m_modelCombo, &QComboBox::currentTextChanged, this, [this](const QString &) { saveUiState(); });
     connect(m_fragmentTargetLanguageCombo, &QComboBox::currentTextChanged, this, [this](const QString &) { saveUiState(); });
     connect(m_fragmentInstructionsEdit, &QLineEdit::textChanged, this, [this](const QString &) { saveUiState(); });
     connect(m_inputEdit, &QPlainTextEdit::textChanged, this, [this]() { saveUiState(); });
@@ -1111,7 +1139,7 @@ void MainWindow::connectPersistenceSignals()
     connect(m_translateProviderCombo, &QComboBox::currentTextChanged, this, [this](const QString &) { saveUiState(); });
     connect(m_translateBaseUrlEdit, &QLineEdit::textChanged, this, [this](const QString &) { saveUiState(); });
     connect(m_translateApiKeyEdit, &QLineEdit::textChanged, this, [this](const QString &) { saveUiState(); });
-    connect(m_translateModelEdit, &QLineEdit::textChanged, this, [this](const QString &) { saveUiState(); });
+    connect(m_translateModelCombo, &QComboBox::currentTextChanged, this, [this](const QString &) { saveUiState(); });
     connect(m_extractMcpServerIdEdit, &QLineEdit::textChanged, this, [this](const QString &) { saveUiState(); });
     connect(m_extractMcpToolNameEdit, &QLineEdit::textChanged, this, [this](const QString &) { saveUiState(); });
     connect(m_termMcpServerIdEdit, &QLineEdit::textChanged, this, [this](const QString &) { saveUiState(); });
@@ -1153,6 +1181,52 @@ void MainWindow::refreshFragmentHistoryView()
     m_fragmentHistoryView->setHtml(fragmentHistoryToHtml(m_fragmentHistory));
 }
 
+void MainWindow::refreshLlamaCppModelList(QComboBox *modelCombo, const QString &provider)
+{
+    if (!modelCombo || !qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(provider)) {
+        return;
+    }
+
+    const QString previousModel = modelCombo->currentText();
+    const QString previousModelPath = modelCombo->currentData().toString();
+
+    qtllm::LlmConfig config;
+    config.providerName = provider;
+
+    qtllm::runtime::LlamaCppRuntimeLayout layout;
+    QString errorMessage;
+    const QList<qtllm::runtime::LlamaCppLocalModel> models =
+        qtllm::runtime::ManagedLlamaCppRuntime::listLocalModels(config, &layout, &errorMessage);
+
+    modelCombo->clear();
+    if (!errorMessage.isEmpty()) {
+        m_statusLabel->setText(errorMessage);
+        return;
+    }
+
+    for (const qtllm::runtime::LlamaCppLocalModel &model : models) {
+        modelCombo->addItem(model.displayName, model.filePath);
+    }
+
+    int previousIndex = previousModelPath.isEmpty() ? -1 : modelCombo->findData(previousModelPath);
+    if (previousIndex < 0) {
+        previousIndex = modelCombo->findText(previousModel);
+    }
+    if (previousIndex >= 0) {
+        modelCombo->setCurrentIndex(previousIndex);
+    } else if (modelCombo->count() > 0) {
+        modelCombo->setCurrentIndex(0);
+    }
+
+    if (models.isEmpty()) {
+        m_statusLabel->setText(QStringLiteral("No GGUF models found in %1").arg(layout.modelsDir));
+    } else {
+        m_statusLabel->setText(QStringLiteral("Loaded %1 local GGUF model(s) from %2")
+                                   .arg(models.size())
+                                   .arg(layout.modelsDir));
+    }
+}
+
 void MainWindow::applyLanguageDetectBinding()
 {
     if (!m_modelRouter) {
@@ -1165,7 +1239,19 @@ void MainWindow::applyLanguageDetectBinding()
     endpoint.llmConfig.providerName = m_providerCombo->currentText().trimmed();
     endpoint.llmConfig.baseUrl = m_baseUrlEdit->text().trimmed();
     endpoint.llmConfig.apiKey = m_apiKeyEdit->text().trimmed();
-    endpoint.llmConfig.model = m_modelEdit->text().trimmed();
+    endpoint.llmConfig.model = m_modelCombo->currentText().trimmed();
+    if (qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(endpoint.llmConfig.providerName)) {
+        endpoint.llmConfig.runtimeName = QStringLiteral("llama-cpp-managed");
+        QString modelPath = selectedModelPath(m_modelCombo);
+        if (endpoint.llmConfig.model.isEmpty()) {
+            refreshLlamaCppModelList(m_modelCombo, endpoint.llmConfig.providerName);
+            endpoint.llmConfig.model = m_modelCombo->currentText().trimmed();
+            modelPath = selectedModelPath(m_modelCombo);
+        }
+        if (!modelPath.isEmpty()) {
+            endpoint.llmConfig.llamaCppModelPath = modelPath;
+        }
+    }
     endpoint.llmConfig.stream = false;
     endpoint.llmConfig.timeoutMs = 30000;
     m_modelRouter->upsertEndpoint(endpoint);
@@ -1189,7 +1275,19 @@ void MainWindow::applyTranslateBinding()
     endpoint.llmConfig.providerName = m_translateProviderCombo->currentText().trimmed();
     endpoint.llmConfig.baseUrl = m_translateBaseUrlEdit->text().trimmed();
     endpoint.llmConfig.apiKey = m_translateApiKeyEdit->text().trimmed();
-    endpoint.llmConfig.model = m_translateModelEdit->text().trimmed();
+    endpoint.llmConfig.model = m_translateModelCombo->currentText().trimmed();
+    if (qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(endpoint.llmConfig.providerName)) {
+        endpoint.llmConfig.runtimeName = QStringLiteral("llama-cpp-managed");
+        QString modelPath = selectedModelPath(m_translateModelCombo);
+        if (endpoint.llmConfig.model.isEmpty()) {
+            refreshLlamaCppModelList(m_translateModelCombo, endpoint.llmConfig.providerName);
+            endpoint.llmConfig.model = m_translateModelCombo->currentText().trimmed();
+            modelPath = selectedModelPath(m_translateModelCombo);
+        }
+        if (!modelPath.isEmpty()) {
+            endpoint.llmConfig.llamaCppModelPath = modelPath;
+        }
+    }
     endpoint.llmConfig.stream = false;
     endpoint.llmConfig.timeoutMs = 120000;
     m_modelRouter->upsertEndpoint(endpoint);

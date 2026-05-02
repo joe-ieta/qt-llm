@@ -3,6 +3,8 @@ TARGET = qtllm_tests
 CONFIG += c++17 testcase console warn_on link_prl
 QT += core network sql testlib
 
+msvc:QMAKE_CXXFLAGS += /utf-8
+
 HEADERS += \
     tst_qtllm.h
 

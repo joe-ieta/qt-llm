@@ -3,6 +3,7 @@
 #include "ollamaprovider.h"
 #include "openaiprovider.h"
 #include "openaicompatibleprovider.h"
+#include "llamacppprovider.h"
 #include "vllmprovider.h"
 
 #include <QString>
@@ -19,6 +20,12 @@ std::unique_ptr<ILLMProvider> ProviderFactory::create(const QString &providerNam
 
     if (provider == QStringLiteral("vllm")) {
         return std::make_unique<VllmProvider>();
+    }
+
+    if (provider == QStringLiteral("llama-cpp")
+        || provider == QStringLiteral("llamacpp")
+        || provider == QStringLiteral("llama-cpp-local")) {
+        return std::make_unique<LlamaCppProvider>();
     }
 
     if (provider == QStringLiteral("openai")) {

@@ -45,6 +45,15 @@ namespace {
 const char kCatalogSelectionId[] = "__catalog__";
 const char kToolStudioDragMimeType[] = "application/x-toolstudio-item";
 
+QPoint eventPosition(const QDropEvent *event)
+{
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    return event->position().toPoint();
+#else
+    return event->pos();
+#endif
+}
+
 QStringList splitTags(const QString &value)
 {
     QStringList parts = value.split(',', Qt::SkipEmptyParts);
@@ -145,7 +154,7 @@ protected:
         QString targetNodeId;
         int insertIndex = -1;
         if ((event->source() == this || event->mimeData()->hasFormat(QString::fromLatin1(kToolStudioDragMimeType)))
-            && computeDropTarget(event->pos(), &targetNodeId, &insertIndex, event->mimeData()->hasFormat(QString::fromLatin1(kToolStudioDragMimeType)))) {
+            && computeDropTarget(eventPosition(event), &targetNodeId, &insertIndex, event->mimeData()->hasFormat(QString::fromLatin1(kToolStudioDragMimeType)))) {
             event->acceptProposedAction();
             return;
         }
@@ -157,7 +166,7 @@ protected:
         QString targetNodeId;
         int insertIndex = -1;
         const bool externalToolDrop = event->mimeData()->hasFormat(QString::fromLatin1(kToolStudioDragMimeType));
-        if (!computeDropTarget(event->pos(), &targetNodeId, &insertIndex, externalToolDrop)) {
+        if (!computeDropTarget(eventPosition(event), &targetNodeId, &insertIndex, externalToolDrop)) {
             event->ignore();
             return;
         }
@@ -362,7 +371,7 @@ protected:
             return;
         }
 
-        int targetRow = rowAt(event->pos().y());
+        int targetRow = rowAt(eventPosition(event).y());
         if (targetRow < 0) {
             targetRow = rowCount();
         } else if (dropIndicatorPosition() == BelowItem) {

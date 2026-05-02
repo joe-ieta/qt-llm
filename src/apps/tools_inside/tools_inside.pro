@@ -3,6 +3,8 @@ TARGET = tools_inside
 CONFIG += c++17 warn_on link_prl
 QT += core gui quick quickcontrols2 sql network
 
+msvc:QMAKE_CXXFLAGS += /utf-8
+
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
 INCLUDEPATH += \
