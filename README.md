@@ -1,156 +1,92 @@
 # qt-llm
 
-`qt-llm` is a lightweight Qt-based LLM interface layer for desktop applications. It provides a practical Qt/C++ foundation for building products with built-in support for LLM conversation, Tools, MCP, SKILL, and Agent workflows.
+qt-llm 是面向 Qt/C++ 应用的 LLM 集成基础库。它把模型访问、provider 封装、流式响应、本地运行态托管、会话管理、工具调用、MCP 和运行观测能力集中到一个可嵌入的 Qt 工程中。
 
-The project is designed for direct code-level integration into a user's own Qt application. It keeps the reusable core, practical tool apps, and business-agent references clearly separated so developers can adopt only the layers they need.
+项目定位很直接：让外部 Qt 应用不用重复理解各类 LLM 服务细节，只通过稳定的 Qt/C++ 接口接入模型能力。
 
-## Project Purpose
+## 主要功能
 
-The purpose of this project is to provide:
+- OpenAI、OpenAI-compatible、Ollama、vLLM、llama.cpp provider。
+- 内置托管 llama.cpp，本地发现 `llama-cpp-runtime` 和 `.gguf` 模型。
+- `RuntimeFacade`：面向 Host App 的简单单轮调用接口。
+- `QtLLMClient`：底层请求执行、流式 token、provider payload、取消请求。
+- `ConversationClient`：多会话、历史、profile、快照和持久化。
+- 工具调用层：工具定义、选择、执行、协议适配。
+- MCP 支持：MCP server 注册、同步、调用。
+- ToolsInside：运行 trace、事件、span、artifact、tool call 记录和查询。
+- ToolStudio：工具目录、导入导出、工作区和元数据管理。
+- 示例 App：simple_chat、multi_client_chat、mcp_server_manager、tools_inside、toolstudio。
+- 参考 Agent：pdf_translator_agent。
 
-- a lightweight Qt-oriented LLM interface layer
-- built-in support for LLM conversation, Tools, MCP, SKILL, and Agent development
-- direct C++/Qt integration into a user's own project
-- runtime monitoring, tracing, and analysis for LLM workflows
+## 典型使用方式
 
-This repository is not positioned as a web-first orchestration service. It is positioned as a Qt/C++ integration base that can be embedded into desktop products and internal tools with a low adoption barrier.
+普通 Host App 推荐使用：
 
-## Three Layers
+```cpp
+qtllm::host::RuntimeFacade runtime;
 
-The repository follows a three-part top-level structure.
+qtllm::host::RuntimeProfile profile;
+profile.providerName = QStringLiteral("llama-cpp");
+profile.model = selectedModelId;
+profile.llamaCppModelPath = selectedModelPath;
+runtime.setProfile(profile);
 
-### 1. `qtllm` (`src/qtllm/`)
+qtllm::host::ChatRequest request;
+request.systemPrompt = QStringLiteral("You are a helpful assistant.");
+request.userPrompt = userText;
+runtime.send(request);
+```
 
-This is the core layer.
+使用层级选择：
 
-It provides reusable infrastructure for:
+- 简单模型调用：`qtllm::host::RuntimeFacade`
+- 高级请求控制：`QtLLMClient`
+- 多会话聊天：`ConversationClient`
+- 工具调用或 MCP：`ToolEnabledChatEntry`
 
-- provider abstraction
-- request/response execution
-- streaming response handling
-- conversation management
-- tool runtime
-- MCP integration
-- storage
-- logging and tracing
-- runtime observability support
+普通 Host App 不建议直接使用 `ProviderFactory`、`HttpExecutor`、`ManagedLlamaCppRuntime` 或具体 provider 类。
 
-### 2. `apps` (`src/apps/`)
+## 本地 llama.cpp
 
-This is the practical tools layer.
+当选择 `llama-cpp` provider 时，qt-llm 可以托管 `llama-server`。默认查找顺序：
 
-It contains host and utility applications built on top of the core layer, including examples such as chat hosts, MCP tools, and `toolsinside`-style analysis utilities.
+1. 当前程序目录下的 `llama-cpp-runtime`
+2. `ZNZ_HOME`、`ZNZ_BLACKBOARD`、`YIDA_HOME`、`YIDA_BLACKBOARD`、`IETA_HOME`、`IETA_BLACKBOARD` 指向目录下的 `llama-cpp-runtime`
+3. Linux：`/home/ieta/LLMs/llama-cpp-runtime`、`/home/IETA/LLMs/llama-cpp-runtime`
+4. Windows：所有磁盘根目录下的 `LLMs/llama-cpp-runtime`
 
-These apps are useful in their own right, but they also serve as reference hosts for how to build on `qtllm`.
+模型放在运行态目录的 `models/` 下，多个 `.gguf` 模型由 App 展示列表并让用户选择，选择结果写入 `llamaCppModelPath`。
 
-### 3. `agents` (`src/agents/`)
+## 工程结构
 
-This is the business-agent layer.
+```text
+src/qtllm/                    核心库
+src/apps/                     示例和工具 App
+src/agents/                   参考业务 Agent
+tests/qtllm_tests/            Qt 单元测试
+docs/                         当前中文文档
+docs/archive/                 历史文档归档
+```
 
-It is used to build common Agents and to provide reference implementations for Agent development. These applications validate how to build workflow-oriented products on top of the shared core instead of adding business logic into `src/apps/`.
+## 构建
 
-The current reference agent is:
+项目当前基线是 Qt + qmake + C++17。
 
-- `src/agents/pdf_translator_agent/`
+```powershell
+qmake qt-llm.pro
+nmake /NOLOGO
+```
 
-## Integration Style
+测试入口：
 
-The intended usage style is simple:
+```powershell
+tests\qtllm_tests\release\qtllm_tests.exe
+```
 
-- include and link the `qtllm` library in a Qt project
-- configure providers and runtime capabilities in C++
-- compose conversation, tool, MCP, SKILL, and Agent flows inside the user's own UI and application logic
+## 文档入口
 
-The design goal is to make code-level integration concise and practical for Qt developers.
-
-## Host App Integration Constraint
-
-External Qt applications should integrate through the narrow public layers owned
-by `qtllm`, not by recreating provider and runtime details in the Host App.
-
-- use `qtllm::host::RuntimeFacade` for simple Host App model calls and local
-  model discovery
-- use `QtLLMClient` for advanced request execution inside `qtllm` or when the
-  Host App intentionally owns lower-level runtime details
-- use `ConversationClient` for sessions, history, profile, and persistence
-- use `ToolEnabledChatEntry` for tool calling and MCP-backed flows
-
-Normal Host Apps should not directly depend on `ProviderFactory`,
-`HttpExecutor`, or `ManagedLlamaCppRuntime` for model calls. The canonical
-integration rules live in
-[docs/HOST_APP_INTEGRATION.md](./docs/HOST_APP_INTEGRATION.md).
-
-## Monitoring, Tracing, and Analysis
-
-A major feature of the project is that it does not stop at request execution.
-
-It also emphasizes runtime monitoring, tracing, and analysis for:
-
-- LLM conversation flows
-- tool execution flows
-- MCP calls
-- SKILL execution paths
-- Agent workflow stages
-
-The repository already includes supporting infrastructure and reference surfaces for:
-
-- structured logs
-- runtime traces
-- artifact recording
-- workflow state inspection
-- analysis-oriented utilities such as `toolsinside`
-
-This makes the project suitable not only for building LLM functions, but also for understanding, debugging, and improving them over time.
-
-## Identity and ID Rules
-
-The repository now treats ID design as a top-level engineering constraint rather than a local storage detail.
-
-- business and observability IDs should use compact prefixed IDs instead of GUID/UUID strings
-- public interfaces should continue to expose IDs as `QString`
-- internal persistence may be reinitialized when the ID architecture changes
-- new code should use the centralized identity module under `src/qtllm/identity/`
-
-The current canonical prefixes cover core runtime, tracing, ToolStudio, and agent workflow entities such as `cli`, `ses`, `trc`, `req`, `spn`, `evt`, `tcl`, `art`, `lnk`, `wsp`, `nod`, `plc`, `pkg`, `tsk`, and `que`.
-
-Detailed rationale and rules are documented in:
-
-- [docs/IDENTITY_ARCHITECTURE.md](./docs/IDENTITY_ARCHITECTURE.md)
-- [CODING_GUIDELINES.md](./CODING_GUIDELINES.md)
-- [docs/DECISIONS.md](./docs/DECISIONS.md)
-
-## Typical Usage
-
-Typical usage scenarios include:
-
-- embedding LLM chat into a Qt desktop application
-- adding tool-calling and MCP-backed capability to an existing Qt product
-- building internal operational tools around LLM workflows
-- building domain-specific Agents with task pipelines, persisted state, and UI
-
-## Environment and Technology Stack
-
-- language: C++17
-- framework: Qt
-- build baseline: qmake
-- target shape: lightweight desktop integration
-- current primary validation environment: Windows
-- intended runtime targets: Windows and Linux
-
-## Recommended Reading Order
-
-1. [README.md](./README.md)
-2. [docs/PROJECT_INTRODUCTION.md](./docs/PROJECT_INTRODUCTION.md)
-3. [docs/REPOSITORY_STRUCTURE.md](./docs/REPOSITORY_STRUCTURE.md)
-4. [docs/ROADMAP.md](./docs/ROADMAP.md)
-5. [docs/IDENTITY_ARCHITECTURE.md](./docs/IDENTITY_ARCHITECTURE.md)
-6. [docs/developer-guide/README.md](./docs/developer-guide/README.md)
-7. [docs/agents/README.md](./docs/agents/README.md)
-
-## Code Entry Points
-
-- core library: `src/qtllm/`
-- host and utility apps: `src/apps/`
-- business agents: `src/agents/`
-- tests: `tests/qtllm_tests/`
-- docs: `docs/`
+- 顶层约束：[AI_RULES.md](./AI_RULES.md)
+- 文档索引：[docs/README.md](./docs/README.md)
+- Host App 集成：[docs/20-integration/host-app-guide.md](./docs/20-integration/host-app-guide.md)
+- 本地 llama.cpp：[docs/20-integration/local-llamacpp-guide.md](./docs/20-integration/local-llamacpp-guide.md)
+- 故障处理：[docs/50-reference/troubleshooting.md](./docs/50-reference/troubleshooting.md)

@@ -1,9 +1,7 @@
-# Release Notes Archive
+# 发布说明
 
-Release notes are archived in this directory.
+本目录保存当前文档体系下仍需维护的发布说明。历史发布材料可在 `docs/archive/2026-05-docs-rebaseline/docs/releases/` 中追溯。
 
-Available versions:
-- [v0.2.2](./v0.2.2.md)
-- [v0.2.1](./v0.2.1.md)
-- [v0.2.0](./v0.2.0.md)
-- [v0.1.0](./v0.1.0.md)
+当前重要版本：
+
+- [v0.2.5](./v0.2.5.md)

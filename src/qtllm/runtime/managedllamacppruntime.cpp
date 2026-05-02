@@ -48,6 +48,34 @@ QString runtimeChildIfPresent(const QString &basePath)
     return QString();
 }
 
+int runtimeRootScore(const QString &runtimeRoot)
+{
+    if (runtimeRoot.trimmed().isEmpty() || !QFileInfo(runtimeRoot).isDir()) {
+        return -1;
+    }
+
+    int score = 0;
+    const QDir root(runtimeRoot);
+#ifdef Q_OS_WIN
+    const QString executablePath = QDir(root.filePath(QStringLiteral("bin"))).filePath(QStringLiteral("llama-server.exe"));
+#else
+    const QString executablePath = QDir(root.filePath(QStringLiteral("bin"))).filePath(QStringLiteral("llama-server"));
+#endif
+    if (QFileInfo(executablePath).isFile()) {
+        score += 1;
+    }
+
+    const QDir modelsDir(root.filePath(QStringLiteral("models")));
+    if (!modelsDir.entryList(QStringList({QStringLiteral("*.gguf")}),
+                             QDir::Files,
+                             QDir::Name | QDir::IgnoreCase)
+             .isEmpty()) {
+        score += 2;
+    }
+
+    return score;
+}
+
 void appendCandidate(QStringList *candidates, const QString &candidate)
 {
     if (!candidates) {
@@ -134,6 +162,10 @@ QString resolveRuntimeRoot(const LlmConfig &config, QString *source, QStringList
         return QFileInfo(explicitRoot).absoluteFilePath();
     }
 
+    QString bestRuntimeRoot;
+    QString bestSource;
+    int bestScore = -1;
+
     const QStringList candidates = runtimeSearchCandidates();
     for (const QString &candidate : candidates) {
         const QString runtimeRoot = runtimeChildIfPresent(candidate);
@@ -142,16 +174,24 @@ QString resolveRuntimeRoot(const LlmConfig &config, QString *source, QStringList
             : runtimeRoot;
         appendCandidate(searchedLocations, searched);
         if (!runtimeRoot.isEmpty()) {
-            if (source) {
-                *source = candidate == appDirPath()
+            const int score = runtimeRootScore(runtimeRoot);
+            if (score > bestScore) {
+                bestScore = score;
+                bestRuntimeRoot = runtimeRoot;
+                bestSource = candidate == appDirPath()
                     ? QStringLiteral("applicationDirPath")
                     : QStringLiteral("runtimeSearchPath");
+                if (score >= 3) {
+                    break;
+                }
             }
-            return runtimeRoot;
         }
     }
 
-    return QString();
+    if (source) {
+        *source = bestSource;
+    }
+    return bestRuntimeRoot;
 }
 
 QStringList localModelFiles(const QString &modelsDir)

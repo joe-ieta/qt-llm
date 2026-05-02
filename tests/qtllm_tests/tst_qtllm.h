@@ -20,6 +20,7 @@ private slots:
     void providerFactoryCreatesKnownProviders();
     void providerFactoryCreatesVendorAliases();
     void providerFactoryRejectsUnknownProvider();
+    void managedLlamaCppRuntimeSkipsEmptyEarlierRuntimeRoot();
     void openAiCompatibleBuildRequestNormalizesPath();
     void openAiCompatibleBuildRequestAnthropic();
     void openAiCompatibleBuildRequestGoogle();

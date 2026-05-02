@@ -26,6 +26,7 @@
 #include "../../src/qtllm/providers/openaicompatibleprovider.h"
 #include "../../src/qtllm/providers/openaiprovider.h"
 #include "../../src/qtllm/providers/providerfactory.h"
+#include "../../src/qtllm/runtime/managedllamacppruntime.h"
 #include "../../src/qtllm/storage/conversationrepository.h"
 #include "../../src/qtllm/streaming/streamchunkparser.h"
 #include "../../src/qtllm/tools/llmtoolregistry.h"
@@ -353,6 +354,67 @@ void QtLlmCoreTests::providerFactoryRejectsUnknownProvider()
 {
     const std::unique_ptr<ILLMProvider> unknown = ProviderFactory::create(QStringLiteral("unknown-provider"));
     QVERIFY(unknown == nullptr);
+}
+
+void QtLlmCoreTests::managedLlamaCppRuntimeSkipsEmptyEarlierRuntimeRoot()
+{
+    const QByteArray oldZnzHome = qgetenv("ZNZ_HOME");
+    const QByteArray oldIetaHome = qgetenv("IETA_HOME");
+    const bool hadZnzHome = qEnvironmentVariableIsSet("ZNZ_HOME");
+    const bool hadIetaHome = qEnvironmentVariableIsSet("IETA_HOME");
+
+    QTemporaryDir emptyRoot;
+    QVERIFY(emptyRoot.isValid());
+    QVERIFY(QDir(emptyRoot.path()).mkpath(QStringLiteral("llama-cpp-runtime/models")));
+
+    QTemporaryDir validRoot;
+    QVERIFY(validRoot.isValid());
+    QDir validDir(validRoot.path());
+    QVERIFY(validDir.mkpath(QStringLiteral("llama-cpp-runtime/bin")));
+    QVERIFY(validDir.mkpath(QStringLiteral("llama-cpp-runtime/models")));
+
+#ifdef Q_OS_WIN
+    const QString executablePath = validDir.filePath(QStringLiteral("llama-cpp-runtime/bin/llama-server.exe"));
+#else
+    const QString executablePath = validDir.filePath(QStringLiteral("llama-cpp-runtime/bin/llama-server"));
+#endif
+    QFile executable(executablePath);
+    QVERIFY(executable.open(QIODevice::WriteOnly));
+    executable.close();
+
+    const QString modelPath = validDir.filePath(QStringLiteral("llama-cpp-runtime/models/test-model.gguf"));
+    QFile model(modelPath);
+    QVERIFY(model.open(QIODevice::WriteOnly));
+    model.write("gguf");
+    model.close();
+
+    qputenv("ZNZ_HOME", QFile::encodeName(emptyRoot.path()));
+    qputenv("IETA_HOME", QFile::encodeName(validRoot.path()));
+
+    LlmConfig config;
+    config.providerName = QStringLiteral("llama-cpp");
+
+    qtllm::runtime::LlamaCppRuntimeLayout layout;
+    QString errorMessage;
+    const QList<qtllm::runtime::LlamaCppLocalModel> models =
+        qtllm::runtime::ManagedLlamaCppRuntime::listLocalModels(config, &layout, &errorMessage);
+
+    if (hadZnzHome) {
+        qputenv("ZNZ_HOME", oldZnzHome);
+    } else {
+        qunsetenv("ZNZ_HOME");
+    }
+    if (hadIetaHome) {
+        qputenv("IETA_HOME", oldIetaHome);
+    } else {
+        qunsetenv("IETA_HOME");
+    }
+
+    QVERIFY2(errorMessage.isEmpty(), qPrintable(errorMessage));
+    QCOMPARE(models.size(), 1);
+    QCOMPARE(models.first().id, QStringLiteral("test-model"));
+    QCOMPARE(QFileInfo(layout.rootDir).absoluteFilePath(),
+             QFileInfo(validDir.filePath(QStringLiteral("llama-cpp-runtime"))).absoluteFilePath());
 }
 
 void QtLlmCoreTests::openAiCompatibleBuildRequestNormalizesPath()
