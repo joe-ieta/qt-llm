@@ -21,9 +21,11 @@ struct LlamaCppRuntimeLayout
     QString discoverySource;
     QString availabilityStatus;
     QString availabilityMessage;
+    QStringList gpuBackendNames;
     bool runtimeRootFound = false;
     bool executableAvailable = false;
     bool modelAvailable = false;
+    bool gpuBackendAvailable = false;
     bool available = false;
     int modelCount = 0;
 };
@@ -58,6 +60,7 @@ public:
 
 private:
     bool waitForPort(int port, int timeoutMs) const;
+    bool isPortOpen(int port) const;
     QString resolveModelPath(const LlmConfig &config, const LlamaCppRuntimeLayout &layout) const;
 
 private:

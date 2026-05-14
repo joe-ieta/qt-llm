@@ -22,9 +22,11 @@
 - `llamaCppExtraArgs`
 - `llamaCppServerPort`
 - `llamaCppContextSize`
-- `llamaCppGpuLayers`
+- `llamaCppGpuLayers`：`< 0` 表示 auto GPU offload，`0` 表示禁用，`> 0` 表示显式层数。
 - `llamaCppThreadCount`
 - `llamaCppStartupTimeoutMs`
+
+managed `llama-cpp` 中，auto 模式会传入 `--gpu-layers 999`。如果 `llamaCppExtraArgs` 已包含 `--gpu-layers`、`--n-gpu-layers` 或 `-ngl`，runtime 不再注入该参数。
 
 ## 可用性字段
 

@@ -9,6 +9,7 @@
 - 刷新本地 `.gguf` 模型列表。
 - 用户从实际模型列表选择模型。
 - 运行时状态应能反映 provider 是否可用。
+- App 启动时会尝试拉起 managed `llama-server`，便于本地 provider 后续直接使用。
 
 ## 本地模型刷新
 

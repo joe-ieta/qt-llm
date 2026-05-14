@@ -1,5 +1,6 @@
 #include "multiclientwindow.h"
 
+#include "../../qtllm/host/managedllamacppappbootstrap.h"
 #include "../../qtllm/logging/logtypes.h"
 #include "../../qtllm/logging/qtllmlogger.h"
 
@@ -39,6 +40,7 @@ int main(int argc, char *argv[])
     logOptions.maxFilesPerClient = 50;
     qtllm::logging::QtLlmLogger::instance().setMinimumLevel(qtllm::logging::LogLevel::Debug);
     qtllm::logging::QtLlmLogger::instance().installFileSink(logOptions);
+    qtllm::host::startManagedLlamaCppRuntimeForApp(&app);
 
     MultiClientWindow window;
     window.show();

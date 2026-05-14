@@ -54,6 +54,7 @@ HEADERS += \
     host/runtimeprofile.h \
     host/runtimeprofilemapper.h \
     host/modelcatalogservice.h \
+    host/managedllamacppappbootstrap.h \
     host/runtimefacade.h \
     storage/conversationrepository.h \
     profile/clientprofile.h \
@@ -120,6 +121,7 @@ SOURCES += \
     chat/conversationclientfactory.cpp \
     host/runtimeprofilemapper.cpp \
     host/modelcatalogservice.cpp \
+    host/managedllamacppappbootstrap.cpp \
     host/runtimefacade.cpp \
     storage/conversationrepository.cpp \
     tools/llmtoolregistry.cpp \

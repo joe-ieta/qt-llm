@@ -8,10 +8,12 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkRequest>
+#include <QHostAddress>
 #include <QTemporaryDir>
 #include <QTcpServer>
 #include <QTextStream>
 #include <QTcpSocket>
+#include <QTimer>
 
 #include "tst_qtllm.h"
 
@@ -415,6 +417,95 @@ void QtLlmCoreTests::managedLlamaCppRuntimeSkipsEmptyEarlierRuntimeRoot()
     QCOMPARE(models.first().id, QStringLiteral("test-model"));
     QCOMPARE(QFileInfo(layout.rootDir).absoluteFilePath(),
              QFileInfo(validDir.filePath(QStringLiteral("llama-cpp-runtime"))).absoluteFilePath());
+}
+
+void QtLlmCoreTests::managedLlamaCppRuntimeDefaultsGpuLayersToAuto()
+{
+    QTemporaryDir runtimeRoot;
+    QVERIFY(runtimeRoot.isValid());
+
+    QDir runtimeDir(runtimeRoot.path());
+    QVERIFY(runtimeDir.mkpath(QStringLiteral("bin")));
+    QVERIFY(runtimeDir.mkpath(QStringLiteral("models")));
+
+    const QString modelPath = runtimeDir.filePath(QStringLiteral("models/test-model.gguf"));
+    QFile model(modelPath);
+    QVERIFY(model.open(QIODevice::WriteOnly));
+    model.write("gguf");
+    model.close();
+
+    QTcpServer portProbe;
+    QVERIFY(portProbe.listen(QHostAddress::LocalHost, 0));
+    const int port = portProbe.serverPort();
+    portProbe.close();
+
+    const QString argsPath = runtimeDir.filePath(QStringLiteral("llama-args.txt"));
+    qputenv("QTLLM_FAKE_LLAMA_ARGS_FILE", QFile::encodeName(argsPath));
+
+    LlmConfig config;
+    config.providerName = QStringLiteral("llama-cpp");
+    config.llamaCppRuntimeRoot = runtimeRoot.path();
+    config.llamaCppExecutablePath = QCoreApplication::applicationFilePath();
+    config.llamaCppModelPath = modelPath;
+    config.llamaCppServerPort = port;
+    config.llamaCppStartupTimeoutMs = 5000;
+
+    qtllm::runtime::ManagedLlamaCppRuntime runtime;
+    QString errorMessage;
+    QVERIFY2(runtime.ensureRunning(&config, &errorMessage), qPrintable(errorMessage));
+
+    QFile argsFile(argsPath);
+    QVERIFY(argsFile.open(QIODevice::ReadOnly));
+    const QString argsText = QString::fromUtf8(argsFile.readAll());
+    argsFile.close();
+
+    runtime.stop();
+    qunsetenv("QTLLM_FAKE_LLAMA_ARGS_FILE");
+
+    const QStringList args = argsText.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    const int gpuFlagIndex = args.indexOf(QStringLiteral("--gpu-layers"));
+    QVERIFY(gpuFlagIndex >= 0);
+    QVERIFY(gpuFlagIndex + 1 < args.size());
+    QCOMPARE(args.at(gpuFlagIndex + 1), QStringLiteral("999"));
+}
+
+void QtLlmCoreTests::managedLlamaCppRuntimeReusesExistingServerPort()
+{
+    QTemporaryDir runtimeRoot;
+    QVERIFY(runtimeRoot.isValid());
+
+    QDir runtimeDir(runtimeRoot.path());
+    QVERIFY(runtimeDir.mkpath(QStringLiteral("bin")));
+    QVERIFY(runtimeDir.mkpath(QStringLiteral("models")));
+
+    const QString modelPath = runtimeDir.filePath(QStringLiteral("models/test-model.gguf"));
+    QFile model(modelPath);
+    QVERIFY(model.open(QIODevice::WriteOnly));
+    model.write("gguf");
+    model.close();
+
+    QTcpServer existingServer;
+    QVERIFY(existingServer.listen(QHostAddress::LocalHost, 0));
+    const int port = existingServer.serverPort();
+
+    const QString argsPath = runtimeDir.filePath(QStringLiteral("should-not-start.txt"));
+    qputenv("QTLLM_FAKE_LLAMA_ARGS_FILE", QFile::encodeName(argsPath));
+
+    LlmConfig config;
+    config.providerName = QStringLiteral("llama-cpp");
+    config.llamaCppRuntimeRoot = runtimeRoot.path();
+    config.llamaCppExecutablePath = QCoreApplication::applicationFilePath();
+    config.llamaCppModelPath = modelPath;
+    config.llamaCppServerPort = port;
+
+    qtllm::runtime::ManagedLlamaCppRuntime runtime;
+    QString errorMessage;
+    QVERIFY2(runtime.ensureRunning(&config, &errorMessage), qPrintable(errorMessage));
+    runtime.stop();
+    qunsetenv("QTLLM_FAKE_LLAMA_ARGS_FILE");
+
+    QVERIFY(!QFileInfo::exists(argsPath));
+    QVERIFY(existingServer.isListening());
 }
 
 void QtLlmCoreTests::openAiCompatibleBuildRequestNormalizesPath()
@@ -1045,6 +1136,32 @@ int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);
     const QStringList args = QCoreApplication::arguments();
+    if (args.contains(QStringLiteral("--host")) && args.contains(QStringLiteral("--port"))) {
+        const QByteArray argsFilePath = qgetenv("QTLLM_FAKE_LLAMA_ARGS_FILE");
+        if (!argsFilePath.isEmpty()) {
+            QFile argsFile(QString::fromLocal8Bit(argsFilePath));
+            if (argsFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                for (int i = 1; i < args.size(); ++i) {
+                    argsFile.write(args.at(i).toUtf8());
+                    argsFile.write("\n");
+                }
+            }
+        }
+
+        const int portIndex = args.indexOf(QStringLiteral("--port"));
+        bool ok = false;
+        const int port = portIndex >= 0 && portIndex + 1 < args.size()
+            ? args.at(portIndex + 1).toInt(&ok)
+            : 0;
+        QTcpServer server;
+        if (!ok || !server.listen(QHostAddress::LocalHost, static_cast<quint16>(port))) {
+            return 2;
+        }
+        QEventLoop loop;
+        QTimer::singleShot(30000, &loop, &QEventLoop::quit);
+        loop.exec();
+        return 0;
+    }
     if (args.size() >= 3 && args.at(1) == QStringLiteral("--emit-json")) {
         QTextStream(stdout) << args.at(2) << Qt::endl;
         return 0;

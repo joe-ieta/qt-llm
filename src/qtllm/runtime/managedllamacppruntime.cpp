@@ -19,6 +19,43 @@ namespace qtllm::runtime {
 namespace {
 
 constexpr const char *kRuntimeDirName = "llama-cpp-runtime";
+constexpr int kAutoGpuLayerCount = 999;
+
+QStringList gpuBackendNameFilters()
+{
+#ifdef Q_OS_WIN
+    return {QStringLiteral("ggml-cuda*.dll"),
+            QStringLiteral("ggml-vulkan*.dll"),
+            QStringLiteral("ggml-hip*.dll"),
+            QStringLiteral("ggml-kompute*.dll"),
+            QStringLiteral("ggml-sycl*.dll"),
+            QStringLiteral("ggml-metal*.dll")};
+#elif defined(Q_OS_MACOS)
+    return {QStringLiteral("libggml-metal*.dylib"),
+            QStringLiteral("libggml-vulkan*.dylib"),
+            QStringLiteral("libggml-cuda*.dylib"),
+            QStringLiteral("libggml-hip*.dylib"),
+            QStringLiteral("libggml-kompute*.dylib"),
+            QStringLiteral("libggml-sycl*.dylib")};
+#else
+    return {QStringLiteral("libggml-cuda*.so"),
+            QStringLiteral("libggml-vulkan*.so"),
+            QStringLiteral("libggml-hip*.so"),
+            QStringLiteral("libggml-kompute*.so"),
+            QStringLiteral("libggml-sycl*.so")};
+#endif
+}
+
+QStringList availableGpuBackends(const QString &binDir)
+{
+    const QDir dir(binDir);
+    QStringList names;
+    for (const QString &fileName : dir.entryList(gpuBackendNameFilters(), QDir::Files, QDir::Name)) {
+        names.append(QFileInfo(fileName).completeBaseName());
+    }
+    names.removeDuplicates();
+    return names;
+}
 
 QString appDirPath()
 {
@@ -233,6 +270,21 @@ QString normalizedProvider(const QString &providerName)
     return providerName.trimmed().toLower();
 }
 
+bool containsGpuLayerArgument(const QStringList &args)
+{
+    for (const QString &arg : args) {
+        const QString normalized = arg.trimmed().toLower();
+        if (normalized == QStringLiteral("--n-gpu-layers")
+            || normalized.startsWith(QStringLiteral("--n-gpu-layers="))
+            || normalized == QStringLiteral("--gpu-layers")
+            || normalized.startsWith(QStringLiteral("--gpu-layers="))
+            || normalized == QStringLiteral("-ngl")) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 ManagedLlamaCppRuntime::ManagedLlamaCppRuntime(QObject *parent)
@@ -286,6 +338,8 @@ LlamaCppRuntimeLayout ManagedLlamaCppRuntime::defaultLayout(const LlmConfig &con
 #endif
     }
     layout.executableAvailable = QFileInfo(layout.executablePath).isFile();
+    layout.gpuBackendNames = availableGpuBackends(layout.binDir);
+    layout.gpuBackendAvailable = !layout.gpuBackendNames.isEmpty();
     layout.modelCount = localModelFiles(layout.modelsDir).size();
     layout.resolvedModelPath = findConfiguredModelPath(config, layout.modelsDir);
     layout.modelAvailable = !layout.resolvedModelPath.trimmed().isEmpty()
@@ -294,7 +348,9 @@ LlamaCppRuntimeLayout ManagedLlamaCppRuntime::defaultLayout(const LlmConfig &con
     layout.available = layout.runtimeRootFound && layout.executableAvailable && layout.modelAvailable;
     if (layout.available) {
         layout.availabilityStatus = QStringLiteral("available");
-        layout.availabilityMessage = QStringLiteral("llama.cpp runtime is available");
+        layout.availabilityMessage = layout.gpuBackendAvailable
+            ? QStringLiteral("llama.cpp runtime is available with GPU backend: %1").arg(layout.gpuBackendNames.join(QStringLiteral(", ")))
+            : QStringLiteral("llama.cpp runtime is available but no GPU backend library was found; it will run CPU-only");
     } else if (!layout.executableAvailable) {
         layout.availabilityStatus = QStringLiteral("executable_not_found");
         layout.availabilityMessage = QStringLiteral("llama.cpp server executable not found: %1").arg(layout.executablePath);
@@ -380,6 +436,7 @@ bool ManagedLlamaCppRuntime::updateRuntimeAvailability(LlmConfig *config,
                         {QStringLiteral("runtimeRoot"), resolved.rootDir},
                         {QStringLiteral("executablePath"), resolved.executablePath},
                         {QStringLiteral("modelCount"), resolved.modelCount},
+                        {QStringLiteral("gpuBackendAvailable"), resolved.gpuBackendAvailable},
                         {QStringLiteral("searched"), searched}});
         return false;
     }
@@ -513,19 +570,47 @@ bool ManagedLlamaCppRuntime::ensureRunning(LlmConfig *config, QString *errorMess
     }
 
     stop();
+    if (isPortOpen(port)) {
+        logging::QtLlmLogger::instance().info(
+            QStringLiteral("llm.runtime"),
+            QStringLiteral("Reusing existing llama.cpp server on configured port"),
+            logging::LogContext(),
+            QJsonObject{{QStringLiteral("baseUrl"), defaultBaseUrl(port)},
+                        {QStringLiteral("runtimeRoot"), layout.rootDir},
+                        {QStringLiteral("modelPath"), modelPath},
+                        {QStringLiteral("port"), port},
+                        {QStringLiteral("ownedByThisRuntime"), false}});
+        if (errorMessage) {
+            errorMessage->clear();
+        }
+        return true;
+    }
 
     QStringList args;
     args << QStringLiteral("--host") << QStringLiteral("127.0.0.1")
          << QStringLiteral("--port") << QString::number(port)
          << QStringLiteral("-m") << modelPath
          << QStringLiteral("--ctx-size") << QString::number(config->llamaCppContextSize > 0 ? config->llamaCppContextSize : 4096);
-    if (config->llamaCppGpuLayers >= 0) {
-        args << QStringLiteral("--n-gpu-layers") << QString::number(config->llamaCppGpuLayers);
+    if (!containsGpuLayerArgument(config->llamaCppExtraArgs)) {
+        const int gpuLayers = config->llamaCppGpuLayers < 0 ? kAutoGpuLayerCount : config->llamaCppGpuLayers;
+        args << QStringLiteral("--gpu-layers") << QString::number(gpuLayers);
     }
     if (config->llamaCppThreadCount > 0) {
         args << QStringLiteral("--threads") << QString::number(config->llamaCppThreadCount);
     }
     args.append(config->llamaCppExtraArgs);
+
+    logging::QtLlmLogger::instance().info(
+        QStringLiteral("llm.runtime"),
+        QStringLiteral("Starting managed llama.cpp server"),
+        logging::LogContext(),
+        QJsonObject{{QStringLiteral("executablePath"), executablePath},
+                    {QStringLiteral("runtimeRoot"), layout.rootDir},
+                    {QStringLiteral("modelPath"), modelPath},
+                    {QStringLiteral("port"), port},
+                    {QStringLiteral("arguments"), QJsonArray::fromStringList(args)},
+                    {QStringLiteral("gpuBackendAvailable"), layout.gpuBackendAvailable},
+                    {QStringLiteral("gpuBackends"), QJsonArray::fromStringList(layout.gpuBackendNames)}});
 
     m_process->setProgram(executablePath);
     m_process->setArguments(args);
@@ -589,6 +674,21 @@ bool ManagedLlamaCppRuntime::waitForPort(int port, int timeoutMs) const
         QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
     }
     return false;
+}
+
+bool ManagedLlamaCppRuntime::isPortOpen(int port) const
+{
+    if (port <= 0) {
+        return false;
+    }
+
+    QTcpSocket socket;
+    socket.connectToHost(QStringLiteral("127.0.0.1"), static_cast<quint16>(port));
+    const bool connected = socket.waitForConnected(250);
+    if (connected) {
+        socket.disconnectFromHost();
+    }
+    return connected;
 }
 
 QString ManagedLlamaCppRuntime::resolveModelPath(const LlmConfig &config,

@@ -22,6 +22,7 @@
 1. [工具和 MCP 集成](./20-integration/tool-mcp-guide.md)
 2. [ToolsInside](./40-apps/tools-inside.md)
 3. [ToolStudio](./40-apps/toolstudio.md)
+4. [MCP Server Manager](./40-apps/mcp-server-manager.md)
 
 参与 qt-llm 开发：
 

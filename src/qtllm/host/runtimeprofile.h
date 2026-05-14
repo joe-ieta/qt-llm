@@ -32,6 +32,8 @@ struct RuntimeProfile
     int retryDelayMs = 400;
     int llamaCppServerPort = 18080;
     int llamaCppContextSize = 4096;
+    // Negative means auto GPU offload for managed llama.cpp, 0 disables offload,
+    // positive values request an explicit layer count.
     int llamaCppGpuLayers = -1;
     int llamaCppThreadCount = 0;
     int llamaCppStartupTimeoutMs = 30000;

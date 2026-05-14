@@ -10,3 +10,5 @@
 - 追踪失败请求的上下文。
 
 ToolsInside 是项目“执行过程可观测”的主要参考界面。
+
+启动时，App 会尝试拉起 managed `llama-server`。如果本地 runtime 不完整，失败会进入日志，不影响 trace 浏览界面启动。
