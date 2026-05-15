@@ -285,6 +285,168 @@ bool containsGpuLayerArgument(const QStringList &args)
     return false;
 }
 
+bool containsAnyArgument(const QStringList &args, const QStringList &names)
+{
+    for (const QString &arg : args) {
+        const QString normalized = arg.trimmed().toLower();
+        for (const QString &name : names) {
+            const QString normalizedName = name.trimmed().toLower();
+            if (normalized == normalizedName || normalized.startsWith(normalizedName + QStringLiteral("="))) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+QString normalizedPolicy(QString value, const QString &fallback, const QStringList &allowed)
+{
+    value = value.trimmed().toLower();
+    if (allowed.contains(value)) {
+        return value;
+    }
+    return fallback;
+}
+
+QString modelSizeClass(qint64 sizeBytes)
+{
+    constexpr qint64 gib = 1024LL * 1024LL * 1024LL;
+    if (sizeBytes <= 0) {
+        return QStringLiteral("unknown");
+    }
+    if (sizeBytes < 5 * gib) {
+        return QStringLiteral("small");
+    }
+    if (sizeBytes < 10 * gib) {
+        return QStringLiteral("medium");
+    }
+    return QStringLiteral("large");
+}
+
+struct LlamaCppLaunchPlan
+{
+    QString gpuMode;
+    QString performanceProfile;
+    QString contextMode;
+    QString modelSizeClass;
+    QStringList warnings;
+    int gpuLayers = 0;
+    int threadCount = 0;
+    int contextSize = 4096;
+    qint64 modelSizeBytes = 0;
+    bool gpuLayersFromExtraArgs = false;
+    bool threadCountFromExtraArgs = false;
+    bool contextSizeFromExtraArgs = false;
+};
+
+int autoContextSize(const QString &performanceProfile, const QString &sizeClass)
+{
+    if (performanceProfile == QStringLiteral("conservative")) {
+        return 4096;
+    }
+    if (performanceProfile == QStringLiteral("aggressive")) {
+        if (sizeClass == QStringLiteral("small")) {
+            return 16384;
+        }
+        if (sizeClass == QStringLiteral("medium")) {
+            return 8192;
+        }
+        return 4096;
+    }
+    if (sizeClass == QStringLiteral("small")) {
+        return 8192;
+    }
+    return 4096;
+}
+
+int autoThreadCount(const QString &performanceProfile)
+{
+    const int idealThreads = QThread::idealThreadCount();
+    if (idealThreads <= 0) {
+        return 0;
+    }
+    if (performanceProfile == QStringLiteral("conservative")) {
+        return qMax(1, idealThreads / 2);
+    }
+    if (performanceProfile == QStringLiteral("aggressive")) {
+        return idealThreads;
+    }
+    return qMax(1, idealThreads - 1);
+}
+
+LlamaCppLaunchPlan buildLaunchPlan(const LlmConfig &config,
+                                   const LlamaCppRuntimeLayout &layout,
+                                   const QString &modelPath)
+{
+    LlamaCppLaunchPlan plan;
+    plan.gpuMode = normalizedPolicy(config.llamaCppGpuMode,
+                                    QStringLiteral("auto"),
+                                    {QStringLiteral("auto"),
+                                     QStringLiteral("cpu-only"),
+                                     QStringLiteral("prefer-gpu"),
+                                     QStringLiteral("explicit")});
+    plan.performanceProfile = normalizedPolicy(config.llamaCppPerformanceProfile,
+                                               QStringLiteral("balanced"),
+                                               {QStringLiteral("conservative"),
+                                                QStringLiteral("balanced"),
+                                                QStringLiteral("aggressive")});
+    plan.contextMode = normalizedPolicy(config.llamaCppContextMode,
+                                        QStringLiteral("auto"),
+                                        {QStringLiteral("auto"), QStringLiteral("explicit")});
+    plan.modelSizeBytes = QFileInfo(modelPath).size();
+    plan.modelSizeClass = modelSizeClass(plan.modelSizeBytes);
+
+    plan.gpuLayersFromExtraArgs = containsGpuLayerArgument(config.llamaCppExtraArgs);
+    plan.threadCountFromExtraArgs =
+        containsAnyArgument(config.llamaCppExtraArgs, {QStringLiteral("--threads"), QStringLiteral("-t")});
+    plan.contextSizeFromExtraArgs =
+        containsAnyArgument(config.llamaCppExtraArgs, {QStringLiteral("--ctx-size"), QStringLiteral("-c")});
+
+    if (plan.gpuLayersFromExtraArgs) {
+        plan.gpuMode = QStringLiteral("extra-args");
+        plan.gpuLayers = config.llamaCppGpuLayers;
+    } else if (plan.gpuMode == QStringLiteral("cpu-only")) {
+        plan.gpuLayers = 0;
+    } else if (plan.gpuMode == QStringLiteral("explicit") || config.llamaCppGpuLayers >= 0) {
+        plan.gpuMode = config.llamaCppGpuLayers == 0 ? QStringLiteral("cpu-only") : QStringLiteral("explicit");
+        plan.gpuLayers = qMax(0, config.llamaCppGpuLayers);
+    } else if (layout.gpuBackendAvailable) {
+        plan.gpuLayers = kAutoGpuLayerCount;
+    } else {
+        plan.gpuLayers = 0;
+        plan.warnings.append(QStringLiteral("No llama.cpp GPU backend library was found; CPU-only launch plan selected."));
+    }
+
+    if (plan.contextSizeFromExtraArgs) {
+        plan.contextSize = config.llamaCppContextSize > 0 ? config.llamaCppContextSize : 4096;
+    } else if (plan.contextMode == QStringLiteral("explicit")) {
+        plan.contextSize = config.llamaCppContextSize > 0 ? config.llamaCppContextSize : 4096;
+    } else {
+        plan.contextSize = autoContextSize(plan.performanceProfile, plan.modelSizeClass);
+    }
+
+    if (plan.threadCountFromExtraArgs) {
+        plan.threadCount = config.llamaCppThreadCount;
+    } else if (config.llamaCppThreadCount > 0) {
+        plan.threadCount = config.llamaCppThreadCount;
+    } else {
+        plan.threadCount = autoThreadCount(plan.performanceProfile);
+    }
+
+    return plan;
+}
+
+QString launchPlanSummary(const LlamaCppLaunchPlan &plan)
+{
+    return QStringLiteral("gpuMode=%1; gpuLayers=%2; threads=%3; ctxSize=%4; performance=%5; modelSize=%6")
+        .arg(plan.gpuMode)
+        .arg(plan.gpuLayers)
+        .arg(plan.threadCount)
+        .arg(plan.contextSize)
+        .arg(plan.performanceProfile)
+        .arg(plan.modelSizeClass);
+}
+
 } // namespace
 
 ManagedLlamaCppRuntime::ManagedLlamaCppRuntime(QObject *parent)
@@ -413,6 +575,24 @@ bool ManagedLlamaCppRuntime::updateRuntimeAvailability(LlmConfig *config,
     config->resolvedModelPath = !resolved.resolvedModelPath.trimmed().isEmpty()
         ? resolved.resolvedModelPath
         : config->llamaCppModelPath.trimmed();
+
+    if (!config->resolvedModelPath.trimmed().isEmpty()
+        && QFileInfo(config->resolvedModelPath).isFile()) {
+        const LlamaCppLaunchPlan launchPlan = buildLaunchPlan(*config, resolved, config->resolvedModelPath);
+        config->resolvedLlamaCppGpuMode = launchPlan.gpuMode;
+        config->resolvedLlamaCppGpuLayers = launchPlan.gpuLayers;
+        config->resolvedLlamaCppThreadCount = launchPlan.threadCount;
+        config->resolvedLlamaCppContextSize = launchPlan.contextSize;
+        config->runtimePlanSummary = launchPlanSummary(launchPlan);
+        config->runtimePlanWarnings = launchPlan.warnings;
+    } else {
+        config->resolvedLlamaCppGpuMode.clear();
+        config->resolvedLlamaCppGpuLayers = -1;
+        config->resolvedLlamaCppThreadCount = 0;
+        config->resolvedLlamaCppContextSize = 0;
+        config->runtimePlanSummary.clear();
+        config->runtimePlanWarnings.clear();
+    }
 
     if (layout) {
         *layout = resolved;
@@ -562,6 +742,14 @@ bool ManagedLlamaCppRuntime::ensureRunning(LlmConfig *config, QString *errorMess
         return false;
     }
 
+    const LlamaCppLaunchPlan launchPlan = buildLaunchPlan(*config, layout, modelPath);
+    config->resolvedLlamaCppGpuMode = launchPlan.gpuMode;
+    config->resolvedLlamaCppGpuLayers = launchPlan.gpuLayers;
+    config->resolvedLlamaCppThreadCount = launchPlan.threadCount;
+    config->resolvedLlamaCppContextSize = launchPlan.contextSize;
+    config->runtimePlanSummary = launchPlanSummary(launchPlan);
+    config->runtimePlanWarnings = launchPlan.warnings;
+
     if (m_process->state() != QProcess::NotRunning
         && m_activeExecutablePath == executablePath
         && m_activeModelPath == modelPath
@@ -579,6 +767,8 @@ bool ManagedLlamaCppRuntime::ensureRunning(LlmConfig *config, QString *errorMess
                         {QStringLiteral("runtimeRoot"), layout.rootDir},
                         {QStringLiteral("modelPath"), modelPath},
                         {QStringLiteral("port"), port},
+                        {QStringLiteral("runtimePlan"), config->runtimePlanSummary},
+                        {QStringLiteral("runtimePlanWarnings"), QJsonArray::fromStringList(config->runtimePlanWarnings)},
                         {QStringLiteral("ownedByThisRuntime"), false}});
         if (errorMessage) {
             errorMessage->clear();
@@ -589,14 +779,15 @@ bool ManagedLlamaCppRuntime::ensureRunning(LlmConfig *config, QString *errorMess
     QStringList args;
     args << QStringLiteral("--host") << QStringLiteral("127.0.0.1")
          << QStringLiteral("--port") << QString::number(port)
-         << QStringLiteral("-m") << modelPath
-         << QStringLiteral("--ctx-size") << QString::number(config->llamaCppContextSize > 0 ? config->llamaCppContextSize : 4096);
-    if (!containsGpuLayerArgument(config->llamaCppExtraArgs)) {
-        const int gpuLayers = config->llamaCppGpuLayers < 0 ? kAutoGpuLayerCount : config->llamaCppGpuLayers;
-        args << QStringLiteral("--gpu-layers") << QString::number(gpuLayers);
+         << QStringLiteral("-m") << modelPath;
+    if (!launchPlan.contextSizeFromExtraArgs) {
+        args << QStringLiteral("--ctx-size") << QString::number(launchPlan.contextSize);
     }
-    if (config->llamaCppThreadCount > 0) {
-        args << QStringLiteral("--threads") << QString::number(config->llamaCppThreadCount);
+    if (!launchPlan.gpuLayersFromExtraArgs) {
+        args << QStringLiteral("--gpu-layers") << QString::number(launchPlan.gpuLayers);
+    }
+    if (!launchPlan.threadCountFromExtraArgs && launchPlan.threadCount > 0) {
+        args << QStringLiteral("--threads") << QString::number(launchPlan.threadCount);
     }
     args.append(config->llamaCppExtraArgs);
 
@@ -610,7 +801,13 @@ bool ManagedLlamaCppRuntime::ensureRunning(LlmConfig *config, QString *errorMess
                     {QStringLiteral("port"), port},
                     {QStringLiteral("arguments"), QJsonArray::fromStringList(args)},
                     {QStringLiteral("gpuBackendAvailable"), layout.gpuBackendAvailable},
-                    {QStringLiteral("gpuBackends"), QJsonArray::fromStringList(layout.gpuBackendNames)}});
+                    {QStringLiteral("gpuBackends"), QJsonArray::fromStringList(layout.gpuBackendNames)},
+                    {QStringLiteral("runtimePlan"), config->runtimePlanSummary},
+                    {QStringLiteral("runtimePlanWarnings"), QJsonArray::fromStringList(config->runtimePlanWarnings)},
+                    {QStringLiteral("resolvedGpuMode"), config->resolvedLlamaCppGpuMode},
+                    {QStringLiteral("resolvedGpuLayers"), config->resolvedLlamaCppGpuLayers},
+                    {QStringLiteral("resolvedThreadCount"), config->resolvedLlamaCppThreadCount},
+                    {QStringLiteral("resolvedContextSize"), config->resolvedLlamaCppContextSize}});
 
     m_process->setProgram(executablePath);
     m_process->setArguments(args);

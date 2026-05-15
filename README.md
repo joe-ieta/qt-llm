@@ -57,7 +57,7 @@ runtime.send(request);
 
 模型放在运行态目录的 `models/` 下，多个 `.gguf` 模型由 App 展示列表并让用户选择，选择结果写入 `llamaCppModelPath`。
 
-GPU offload 默认使用 auto 语义：`llamaCppGpuLayers < 0` 时，managed runtime 会向 `llama-server` 传入 `--gpu-layers 999`，让 llama.cpp 在可用时尽可能使用 GPU；`0` 表示显式禁用 GPU offload；正数表示指定 offload 层数。实际是否能使用 GPU 取决于 `llama-cpp-runtime/bin` 中是否包含 CUDA、Vulkan、HIP、SYCL 等 GPU backend 库。
+managed runtime 默认使用自动运行规划：Host App 只需选择 provider 和模型，qt-llm 会根据高层策略字段、模型文件大小、GPU backend 是否存在和 CPU 线程数派生 `--gpu-layers`、`--threads`、`--ctx-size`。普通 Host App 推荐暴露 `auto` / `cpu-only` / `prefer-gpu` 这类策略，不直接要求用户填写 GPU layers、线程数等底层启动参数；这些字段仍作为专家覆盖保留。
 
 ## 工程结构
 

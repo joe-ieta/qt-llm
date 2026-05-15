@@ -23,6 +23,12 @@ struct LlmConfig
     QString providerAvailabilityMessage;
     QString resolvedRuntimeRoot;
     QString resolvedModelPath;
+    QString llamaCppGpuMode = QStringLiteral("auto"); // auto, cpu-only, prefer-gpu, explicit
+    QString llamaCppPerformanceProfile = QStringLiteral("balanced"); // conservative, balanced, aggressive
+    QString llamaCppContextMode = QStringLiteral("auto"); // auto, explicit
+    QString resolvedLlamaCppGpuMode;
+    QString runtimePlanSummary;
+    QStringList runtimePlanWarnings;
     int localModelCount = 0;
 
     int timeoutMs = 60000;
@@ -35,6 +41,9 @@ struct LlmConfig
     int llamaCppGpuLayers = -1;
     int llamaCppThreadCount = 0;
     int llamaCppStartupTimeoutMs = 30000;
+    int resolvedLlamaCppGpuLayers = -1;
+    int resolvedLlamaCppThreadCount = 0;
+    int resolvedLlamaCppContextSize = 0;
 };
 
 } // namespace qtllm

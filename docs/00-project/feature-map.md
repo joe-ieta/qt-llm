@@ -5,7 +5,7 @@
 - `QtLLMClient`：统一 LLM 请求入口，支持普通请求、流式 token、取消请求、payload 观测。
 - provider：OpenAI、OpenAI-compatible、Ollama、vLLM、llama.cpp。
 - `RuntimeFacade`：面向 Host App 的 RuntimeProfile 映射、模型发现、阻塞/非阻塞请求。
-- 内置 `llama.cpp` 托管：运行态目录发现、`llama-server` 启动、端口等待、本地 `.gguf` 模型发现、默认 auto GPU offload。
+- 内置 `llama.cpp` 托管：运行态目录发现、`llama-server` 启动、端口等待、本地 `.gguf` 模型发现、基于模型和本机能力的自动运行规划。
 - provider 可用性字段：`providerAvailable`、`providerAvailabilityStatus`、`providerAvailabilityMessage`、`resolvedRuntimeRoot`、`resolvedModelPath`、`localModelCount`。
 - `ConversationClient`：多会话、历史、profile、snapshot、持久化工厂。
 - 工具调用：工具定义、工具选择、执行层、协议适配和调用编排。

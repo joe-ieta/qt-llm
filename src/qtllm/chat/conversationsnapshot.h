@@ -140,6 +140,12 @@ struct ConversationSnapshot
         configObject.insert(QStringLiteral("providerAvailabilityMessage"), config.providerAvailabilityMessage);
         configObject.insert(QStringLiteral("resolvedRuntimeRoot"), config.resolvedRuntimeRoot);
         configObject.insert(QStringLiteral("resolvedModelPath"), config.resolvedModelPath);
+        configObject.insert(QStringLiteral("llamaCppGpuMode"), config.llamaCppGpuMode);
+        configObject.insert(QStringLiteral("llamaCppPerformanceProfile"), config.llamaCppPerformanceProfile);
+        configObject.insert(QStringLiteral("llamaCppContextMode"), config.llamaCppContextMode);
+        configObject.insert(QStringLiteral("resolvedLlamaCppGpuMode"), config.resolvedLlamaCppGpuMode);
+        configObject.insert(QStringLiteral("runtimePlanSummary"), config.runtimePlanSummary);
+        configObject.insert(QStringLiteral("runtimePlanWarnings"), QJsonArray::fromStringList(config.runtimePlanWarnings));
         configObject.insert(QStringLiteral("localModelCount"), config.localModelCount);
         configObject.insert(QStringLiteral("timeoutMs"), config.timeoutMs);
         configObject.insert(QStringLiteral("maxRetries"), config.maxRetries);
@@ -149,6 +155,9 @@ struct ConversationSnapshot
         configObject.insert(QStringLiteral("llamaCppGpuLayers"), config.llamaCppGpuLayers);
         configObject.insert(QStringLiteral("llamaCppThreadCount"), config.llamaCppThreadCount);
         configObject.insert(QStringLiteral("llamaCppStartupTimeoutMs"), config.llamaCppStartupTimeoutMs);
+        configObject.insert(QStringLiteral("resolvedLlamaCppGpuLayers"), config.resolvedLlamaCppGpuLayers);
+        configObject.insert(QStringLiteral("resolvedLlamaCppThreadCount"), config.resolvedLlamaCppThreadCount);
+        configObject.insert(QStringLiteral("resolvedLlamaCppContextSize"), config.resolvedLlamaCppContextSize);
         root.insert(QStringLiteral("config"), configObject);
 
         root.insert(QStringLiteral("profile"), profile.toJson());
@@ -191,6 +200,18 @@ struct ConversationSnapshot
         snapshot.config.providerAvailabilityMessage = configObject.value(QStringLiteral("providerAvailabilityMessage")).toString();
         snapshot.config.resolvedRuntimeRoot = configObject.value(QStringLiteral("resolvedRuntimeRoot")).toString();
         snapshot.config.resolvedModelPath = configObject.value(QStringLiteral("resolvedModelPath")).toString();
+        snapshot.config.llamaCppGpuMode = configObject.value(QStringLiteral("llamaCppGpuMode")).toString(snapshot.config.llamaCppGpuMode);
+        snapshot.config.llamaCppPerformanceProfile = configObject.value(QStringLiteral("llamaCppPerformanceProfile")).toString(snapshot.config.llamaCppPerformanceProfile);
+        snapshot.config.llamaCppContextMode = configObject.value(QStringLiteral("llamaCppContextMode")).toString(snapshot.config.llamaCppContextMode);
+        snapshot.config.resolvedLlamaCppGpuMode = configObject.value(QStringLiteral("resolvedLlamaCppGpuMode")).toString();
+        snapshot.config.runtimePlanSummary = configObject.value(QStringLiteral("runtimePlanSummary")).toString();
+        const QJsonArray runtimePlanWarnings = configObject.value(QStringLiteral("runtimePlanWarnings")).toArray();
+        for (const QJsonValue &value : runtimePlanWarnings) {
+            const QString warning = value.toString();
+            if (!warning.isEmpty()) {
+                snapshot.config.runtimePlanWarnings.append(warning);
+            }
+        }
         snapshot.config.localModelCount = configObject.value(QStringLiteral("localModelCount")).toInt(snapshot.config.localModelCount);
         snapshot.config.timeoutMs = configObject.value(QStringLiteral("timeoutMs")).toInt(snapshot.config.timeoutMs);
         snapshot.config.maxRetries = configObject.value(QStringLiteral("maxRetries")).toInt(snapshot.config.maxRetries);
@@ -200,6 +221,9 @@ struct ConversationSnapshot
         snapshot.config.llamaCppGpuLayers = configObject.value(QStringLiteral("llamaCppGpuLayers")).toInt(snapshot.config.llamaCppGpuLayers);
         snapshot.config.llamaCppThreadCount = configObject.value(QStringLiteral("llamaCppThreadCount")).toInt(snapshot.config.llamaCppThreadCount);
         snapshot.config.llamaCppStartupTimeoutMs = configObject.value(QStringLiteral("llamaCppStartupTimeoutMs")).toInt(snapshot.config.llamaCppStartupTimeoutMs);
+        snapshot.config.resolvedLlamaCppGpuLayers = configObject.value(QStringLiteral("resolvedLlamaCppGpuLayers")).toInt(snapshot.config.resolvedLlamaCppGpuLayers);
+        snapshot.config.resolvedLlamaCppThreadCount = configObject.value(QStringLiteral("resolvedLlamaCppThreadCount")).toInt(snapshot.config.resolvedLlamaCppThreadCount);
+        snapshot.config.resolvedLlamaCppContextSize = configObject.value(QStringLiteral("resolvedLlamaCppContextSize")).toInt(snapshot.config.resolvedLlamaCppContextSize);
 
         snapshot.profile = profile::ClientProfile::fromJson(root.value(QStringLiteral("profile")).toObject());
         snapshot.activeSessionId = root.value(QStringLiteral("activeSessionId")).toString();

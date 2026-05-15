@@ -16,17 +16,37 @@
 
 ## llama.cpp 字段
 
+基础路径和启动字段：
+
 - `llamaCppRuntimeRoot`
 - `llamaCppExecutablePath`
 - `llamaCppModelPath`
 - `llamaCppExtraArgs`
 - `llamaCppServerPort`
-- `llamaCppContextSize`
-- `llamaCppGpuLayers`：`< 0` 表示 auto GPU offload，`0` 表示禁用，`> 0` 表示显式层数。
-- `llamaCppThreadCount`
 - `llamaCppStartupTimeoutMs`
 
-managed `llama-cpp` 中，auto 模式会传入 `--gpu-layers 999`。如果 `llamaCppExtraArgs` 已包含 `--gpu-layers`、`--n-gpu-layers` 或 `-ngl`，runtime 不再注入该参数。
+高层运行策略字段：
+
+- `llamaCppGpuMode`：`auto`、`cpu-only`、`prefer-gpu`、`explicit`，默认 `auto`。
+- `llamaCppPerformanceProfile`：`conservative`、`balanced`、`aggressive`，默认 `balanced`。
+- `llamaCppContextMode`：`auto`、`explicit`，默认 `auto`。
+
+专家覆盖字段：
+
+- `llamaCppContextSize`：`llamaCppContextMode=explicit` 时使用；否则作为兼容字段保留。
+- `llamaCppGpuLayers`：`>= 0` 时作为显式 GPU offload 层数；`-1` 表示交给 `llamaCppGpuMode` 自动规划。
+- `llamaCppThreadCount`：`> 0` 时作为显式线程数；否则自动规划。
+
+派生诊断字段：
+
+- `resolvedLlamaCppGpuMode`
+- `resolvedLlamaCppGpuLayers`
+- `resolvedLlamaCppThreadCount`
+- `resolvedLlamaCppContextSize`
+- `runtimePlanSummary`
+- `runtimePlanWarnings`
+
+managed `llama-cpp` 启动前会先生成 launch plan，再注入 `--gpu-layers`、`--threads`、`--ctx-size`。如果 `llamaCppExtraArgs` 已包含对应参数，extra args 优先，runtime 不再重复注入。
 
 ## 可用性字段
 

@@ -49,17 +49,30 @@ profile.llamaCppModelPath = model.filePath;
 
 这与 OpenAI API 的模型选择方式一致：模型是请求配置的一部分，而不是 runtime 隐式猜测。
 
-## GPU offload
+## 自动运行规划
 
-`llamaCppGpuLayers` 使用三态整数语义：
+managed `llama.cpp` 的默认集成模型是：Host App 选择 provider 和模型，qt-llm 根据模型文件、运行态目录和当前策略派生 `llama-server` 启动参数。Host App 不应把 `llamaCppGpuLayers`、`llamaCppThreadCount`、`llamaCppContextSize` 当成主要产品配置项暴露给普通用户。
 
-- `< 0`：auto。managed runtime 会传入 `--gpu-layers 999`，让 llama.cpp 在可用时尽可能 offload 到 GPU。
-- `0`：禁用 GPU offload，传入 `--gpu-layers 0`。
-- `> 0`：显式 offload 层数，传入对应数值。
+推荐优先使用高层策略字段：
 
-如果 `llamaCppExtraArgs` 中已经包含 `--gpu-layers`、`--gpu-layers=<n>`、`--n-gpu-layers`、`--n-gpu-layers=<n>` 或 `-ngl`，runtime 不会再注入默认 GPU 参数，调用方可以完全接管该参数。
+- `llamaCppGpuMode`：`auto`、`cpu-only`、`prefer-gpu`、`explicit`。
+- `llamaCppPerformanceProfile`：`conservative`、`balanced`、`aggressive`。
+- `llamaCppContextMode`：`auto`、`explicit`。
 
-注意：传入 GPU layers 只表示请求 GPU offload。实际能否使用 GPU，取决于 `llama-cpp-runtime/bin` 是否包含 GPU backend 库，例如 CUDA、Vulkan、HIP、SYCL 等。只有 CPU backend 的 runtime 即使传入 `--gpu-layers 999`，也只能 CPU 运行。
+当前规划规则：
+
+- `auto` / `prefer-gpu` 在检测到 GPU backend 库时注入 `--gpu-layers 999`，否则注入 `--gpu-layers 0` 并写入 warning。
+- `cpu-only` 总是注入 `--gpu-layers 0`。
+- `explicit` 或非负 `llamaCppGpuLayers` 使用显式层数。
+- `llamaCppThreadCount > 0` 时作为显式线程数；否则按 performance profile 和 `QThread::idealThreadCount()` 自动派生。
+- `llamaCppContextMode=auto` 时按模型文件大小和 performance profile 派生 `--ctx-size`；`explicit` 时使用 `llamaCppContextSize`。
+
+如果 `llamaCppExtraArgs` 中已经包含 `--gpu-layers`、`--gpu-layers=<n>`、`--n-gpu-layers`、`--n-gpu-layers=<n>` 或 `-ngl`，runtime 不会再注入 GPU 参数。`--threads`、`-t`、`--ctx-size`、`-c` 也遵循同样的专家覆盖规则。
+
+运行后可读取诊断字段：`resolvedLlamaCppGpuMode`、`resolvedLlamaCppGpuLayers`、`resolvedLlamaCppThreadCount`、`resolvedLlamaCppContextSize`、`runtimePlanSummary`、`runtimePlanWarnings`。配置 UI 应优先展示这些解析结果，而不是要求用户理解底层启动参数。
+
+注意：当前自动规划只基于运行态中是否存在 GPU backend 库、模型文件大小和 CPU 线程数做保守推断；精确 VRAM/RAM 探测和按量化格式估算仍属于后续增强。
+
 
 ## 进程生命周期
 

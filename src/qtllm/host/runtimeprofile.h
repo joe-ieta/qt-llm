@@ -26,6 +26,12 @@ struct RuntimeProfile
     QString providerAvailabilityMessage;
     QString resolvedRuntimeRoot;
     QString resolvedModelPath;
+    QString llamaCppGpuMode = QStringLiteral("auto");
+    QString llamaCppPerformanceProfile = QStringLiteral("balanced");
+    QString llamaCppContextMode = QStringLiteral("auto");
+    QString resolvedLlamaCppGpuMode;
+    QString runtimePlanSummary;
+    QStringList runtimePlanWarnings;
     int localModelCount = 0;
     int timeoutMs = 60000;
     int maxRetries = 0;
@@ -37,6 +43,9 @@ struct RuntimeProfile
     int llamaCppGpuLayers = -1;
     int llamaCppThreadCount = 0;
     int llamaCppStartupTimeoutMs = 30000;
+    int resolvedLlamaCppGpuLayers = -1;
+    int resolvedLlamaCppThreadCount = 0;
+    int resolvedLlamaCppContextSize = 0;
 };
 
 struct ChatRequest

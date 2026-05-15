@@ -22,6 +22,7 @@ private slots:
     void providerFactoryRejectsUnknownProvider();
     void managedLlamaCppRuntimeSkipsEmptyEarlierRuntimeRoot();
     void managedLlamaCppRuntimeDefaultsGpuLayersToAuto();
+    void managedLlamaCppRuntimeCpuOnlyPolicyDisablesGpuLayers();
     void managedLlamaCppRuntimeReusesExistingServerPort();
     void openAiCompatibleBuildRequestNormalizesPath();
     void openAiCompatibleBuildRequestAnthropic();

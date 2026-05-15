@@ -5,6 +5,7 @@
 #include "../runtime/managedllamacppruntime.h"
 
 #include <QCoreApplication>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QObject>
 
@@ -47,6 +48,12 @@ runtime::ManagedLlamaCppRuntime *startManagedLlamaCppRuntimeForApp(QObject *pare
                     {QStringLiteral("modelPath"), config.resolvedModelPath},
                     {QStringLiteral("model"), config.model},
                     {QStringLiteral("gpuLayers"), config.llamaCppGpuLayers},
+                    {QStringLiteral("runtimePlan"), config.runtimePlanSummary},
+                    {QStringLiteral("runtimePlanWarnings"), QJsonArray::fromStringList(config.runtimePlanWarnings)},
+                    {QStringLiteral("resolvedGpuMode"), config.resolvedLlamaCppGpuMode},
+                    {QStringLiteral("resolvedGpuLayers"), config.resolvedLlamaCppGpuLayers},
+                    {QStringLiteral("resolvedThreadCount"), config.resolvedLlamaCppThreadCount},
+                    {QStringLiteral("resolvedContextSize"), config.resolvedLlamaCppContextSize},
                     {QStringLiteral("availabilityMessage"), config.providerAvailabilityMessage}});
     QObject::connect(QCoreApplication::instance(),
                      &QCoreApplication::aboutToQuit,

@@ -428,6 +428,16 @@ void QtLlmCoreTests::managedLlamaCppRuntimeDefaultsGpuLayersToAuto()
     QVERIFY(runtimeDir.mkpath(QStringLiteral("bin")));
     QVERIFY(runtimeDir.mkpath(QStringLiteral("models")));
 
+#ifdef Q_OS_WIN
+    QFile fakeBackend(runtimeDir.filePath(QStringLiteral("bin/ggml-vulkan.dll")));
+#elif defined(Q_OS_MACOS)
+    QFile fakeBackend(runtimeDir.filePath(QStringLiteral("bin/libggml-metal.dylib")));
+#else
+    QFile fakeBackend(runtimeDir.filePath(QStringLiteral("bin/libggml-vulkan.so")));
+#endif
+    QVERIFY(fakeBackend.open(QIODevice::WriteOnly));
+    fakeBackend.close();
+
     const QString modelPath = runtimeDir.filePath(QStringLiteral("models/test-model.gguf"));
     QFile model(modelPath);
     QVERIFY(model.open(QIODevice::WriteOnly));
@@ -467,6 +477,72 @@ void QtLlmCoreTests::managedLlamaCppRuntimeDefaultsGpuLayersToAuto()
     QVERIFY(gpuFlagIndex >= 0);
     QVERIFY(gpuFlagIndex + 1 < args.size());
     QCOMPARE(args.at(gpuFlagIndex + 1), QStringLiteral("999"));
+    QCOMPARE(config.resolvedLlamaCppGpuMode, QStringLiteral("auto"));
+    QCOMPARE(config.resolvedLlamaCppGpuLayers, 999);
+    QVERIFY(config.resolvedLlamaCppThreadCount > 0);
+    QVERIFY(config.resolvedLlamaCppContextSize > 0);
+    QVERIFY(config.runtimePlanSummary.contains(QStringLiteral("gpuLayers=999")));
+}
+
+void QtLlmCoreTests::managedLlamaCppRuntimeCpuOnlyPolicyDisablesGpuLayers()
+{
+    QTemporaryDir runtimeRoot;
+    QVERIFY(runtimeRoot.isValid());
+
+    QDir runtimeDir(runtimeRoot.path());
+    QVERIFY(runtimeDir.mkpath(QStringLiteral("bin")));
+    QVERIFY(runtimeDir.mkpath(QStringLiteral("models")));
+
+    const QString modelPath = runtimeDir.filePath(QStringLiteral("models/test-model.gguf"));
+    QFile model(modelPath);
+    QVERIFY(model.open(QIODevice::WriteOnly));
+    model.write("gguf");
+    model.close();
+
+    QTcpServer portProbe;
+    QVERIFY(portProbe.listen(QHostAddress::LocalHost, 0));
+    const int port = portProbe.serverPort();
+    portProbe.close();
+
+    const QString argsPath = runtimeDir.filePath(QStringLiteral("llama-args.txt"));
+    qputenv("QTLLM_FAKE_LLAMA_ARGS_FILE", QFile::encodeName(argsPath));
+
+    LlmConfig config;
+    config.providerName = QStringLiteral("llama-cpp");
+    config.llamaCppRuntimeRoot = runtimeRoot.path();
+    config.llamaCppExecutablePath = QCoreApplication::applicationFilePath();
+    config.llamaCppModelPath = modelPath;
+    config.llamaCppServerPort = port;
+    config.llamaCppStartupTimeoutMs = 5000;
+    config.llamaCppGpuMode = QStringLiteral("cpu-only");
+    config.llamaCppPerformanceProfile = QStringLiteral("conservative");
+    config.llamaCppContextMode = QStringLiteral("auto");
+
+    qtllm::runtime::ManagedLlamaCppRuntime runtime;
+    QString errorMessage;
+    QVERIFY2(runtime.ensureRunning(&config, &errorMessage), qPrintable(errorMessage));
+
+    QFile argsFile(argsPath);
+    QVERIFY(argsFile.open(QIODevice::ReadOnly));
+    const QString argsText = QString::fromUtf8(argsFile.readAll());
+    argsFile.close();
+
+    runtime.stop();
+    qunsetenv("QTLLM_FAKE_LLAMA_ARGS_FILE");
+
+    const QStringList args = argsText.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    const int gpuFlagIndex = args.indexOf(QStringLiteral("--gpu-layers"));
+    QVERIFY(gpuFlagIndex >= 0);
+    QVERIFY(gpuFlagIndex + 1 < args.size());
+    QCOMPARE(args.at(gpuFlagIndex + 1), QStringLiteral("0"));
+    const int contextFlagIndex = args.indexOf(QStringLiteral("--ctx-size"));
+    QVERIFY(contextFlagIndex >= 0);
+    QVERIFY(contextFlagIndex + 1 < args.size());
+    QCOMPARE(args.at(contextFlagIndex + 1), QStringLiteral("4096"));
+    QCOMPARE(config.resolvedLlamaCppGpuMode, QStringLiteral("cpu-only"));
+    QCOMPARE(config.resolvedLlamaCppGpuLayers, 0);
+    QCOMPARE(config.resolvedLlamaCppContextSize, 4096);
+    QVERIFY(config.runtimePlanSummary.contains(QStringLiteral("performance=conservative")));
 }
 
 void QtLlmCoreTests::managedLlamaCppRuntimeReusesExistingServerPort()

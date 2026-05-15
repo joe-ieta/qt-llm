@@ -20,6 +20,12 @@ LlmConfig RuntimeProfileMapper::toConfig(const RuntimeProfile &profile)
     config.providerAvailabilityMessage = profile.providerAvailabilityMessage;
     config.resolvedRuntimeRoot = profile.resolvedRuntimeRoot;
     config.resolvedModelPath = profile.resolvedModelPath;
+    config.llamaCppGpuMode = profile.llamaCppGpuMode.trimmed();
+    config.llamaCppPerformanceProfile = profile.llamaCppPerformanceProfile.trimmed();
+    config.llamaCppContextMode = profile.llamaCppContextMode.trimmed();
+    config.resolvedLlamaCppGpuMode = profile.resolvedLlamaCppGpuMode;
+    config.runtimePlanSummary = profile.runtimePlanSummary;
+    config.runtimePlanWarnings = profile.runtimePlanWarnings;
     config.localModelCount = profile.localModelCount;
     config.timeoutMs = profile.timeoutMs;
     config.maxRetries = profile.maxRetries;
@@ -29,6 +35,9 @@ LlmConfig RuntimeProfileMapper::toConfig(const RuntimeProfile &profile)
     config.llamaCppGpuLayers = profile.llamaCppGpuLayers;
     config.llamaCppThreadCount = profile.llamaCppThreadCount;
     config.llamaCppStartupTimeoutMs = profile.llamaCppStartupTimeoutMs;
+    config.resolvedLlamaCppGpuLayers = profile.resolvedLlamaCppGpuLayers;
+    config.resolvedLlamaCppThreadCount = profile.resolvedLlamaCppThreadCount;
+    config.resolvedLlamaCppContextSize = profile.resolvedLlamaCppContextSize;
     return config;
 }
 
@@ -50,6 +59,12 @@ RuntimeProfile RuntimeProfileMapper::fromConfig(const LlmConfig &config)
     profile.providerAvailabilityMessage = config.providerAvailabilityMessage;
     profile.resolvedRuntimeRoot = config.resolvedRuntimeRoot;
     profile.resolvedModelPath = config.resolvedModelPath;
+    profile.llamaCppGpuMode = config.llamaCppGpuMode;
+    profile.llamaCppPerformanceProfile = config.llamaCppPerformanceProfile;
+    profile.llamaCppContextMode = config.llamaCppContextMode;
+    profile.resolvedLlamaCppGpuMode = config.resolvedLlamaCppGpuMode;
+    profile.runtimePlanSummary = config.runtimePlanSummary;
+    profile.runtimePlanWarnings = config.runtimePlanWarnings;
     profile.localModelCount = config.localModelCount;
     profile.timeoutMs = config.timeoutMs;
     profile.maxRetries = config.maxRetries;
@@ -59,6 +74,9 @@ RuntimeProfile RuntimeProfileMapper::fromConfig(const LlmConfig &config)
     profile.llamaCppGpuLayers = config.llamaCppGpuLayers;
     profile.llamaCppThreadCount = config.llamaCppThreadCount;
     profile.llamaCppStartupTimeoutMs = config.llamaCppStartupTimeoutMs;
+    profile.resolvedLlamaCppGpuLayers = config.resolvedLlamaCppGpuLayers;
+    profile.resolvedLlamaCppThreadCount = config.resolvedLlamaCppThreadCount;
+    profile.resolvedLlamaCppContextSize = config.resolvedLlamaCppContextSize;
     return profile;
 }
 
