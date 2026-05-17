@@ -1,35 +1,45 @@
-# Provider 与 Runtime
+# Provider And Runtime
 
 ## Provider
 
-当前 provider factory 支持：
+The current provider factory supports:
 
 - `openai`
 - `openai-compatible`
 - `ollama`
 - `vllm`
 - `llama-cpp`
-- 若干 OpenAI-compatible vendor alias，例如 `sglang`、`anthropic`、`google`、`gemini`、`deepseek`、`qwen`、`glm`、`zhipu`
+- OpenAI-compatible vendor aliases such as `sglang`, `anthropic`, `google`,
+  `gemini`, `deepseek`, `qwen`, `glm`, and `zhipu`
 
-provider 负责协议差异，Host App 不应复制 provider payload 逻辑。
+Providers own protocol-shape differences. Host apps should not duplicate
+provider payload construction logic.
 
-## Managed llama.cpp
+## Managed `llama.cpp`
 
-`ManagedLlamaCppRuntime` 负责：
+`ManagedLlamaCppRuntime` owns:
 
-- 判断 provider 是否属于托管 llama.cpp。
-- 解析运行态目录。
-- 发现 `llama-server`。
-- 发现 `models/*.gguf`。
-- 选择模型路径。
-- 启动本地 server 并等待端口可用。
-- 更新 `LlmConfig` 的可用性状态。
+- deciding whether a provider is a managed `llama.cpp` provider
+- resolving the managed runtime root
+- resolving the `llama-server` executable
+- building the managed model catalog
+- resolving the active model path
+- deriving the launch plan
+- starting the local server and waiting for the target port
+- updating `LlmConfig` availability and resolved diagnostics
 
-运行态目录会根据候选评分选择最合适目录。只有空目录的 `llama-cpp-runtime` 不应遮挡后续包含可执行文件和模型的共享目录。
+The active model is:
 
-## 可用性状态
+- the runtime root defaults to the app-local `llama-cpp-runtime`
+- bundled models come from `<runtimeRoot>/models`
+- supplemental models may be aggregated from shared `qtllm/models` roots
 
-`LlmConfig` 中与可用性相关的字段：
+This keeps runtime packaging and model discovery inside `qt-llm` instead of
+spreading directory rules into each host app.
+
+## Availability State
+
+The main availability-related `LlmConfig` fields are:
 
 - `providerAvailable`
 - `providerAvailabilityStatus`
@@ -38,4 +48,6 @@ provider 负责协议差异，Host App 不应复制 provider payload 逻辑。
 - `resolvedModelPath`
 - `localModelCount`
 
-配置界面应展示这些字段，而不是只在调用失败后显示普通网络错误。
+Host configuration UIs should surface these fields as availability and
+diagnostic information instead of only showing a generic request failure after
+invocation time.

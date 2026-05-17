@@ -64,55 +64,6 @@ QString appDirPath()
         : QDir::currentPath();
 }
 
-QString runtimeChildIfPresent(const QString &basePath)
-{
-    const QString trimmed = basePath.trimmed();
-    if (trimmed.isEmpty()) {
-        return QString();
-    }
-
-    const QFileInfo directInfo(trimmed);
-    if (directInfo.exists()
-        && directInfo.isDir()
-        && directInfo.fileName().compare(QString::fromLatin1(kRuntimeDirName), Qt::CaseInsensitive) == 0) {
-        return directInfo.absoluteFilePath();
-    }
-
-    const QFileInfo childInfo(QDir(trimmed).filePath(QString::fromLatin1(kRuntimeDirName)));
-    if (childInfo.exists() && childInfo.isDir()) {
-        return childInfo.absoluteFilePath();
-    }
-    return QString();
-}
-
-int runtimeRootScore(const QString &runtimeRoot)
-{
-    if (runtimeRoot.trimmed().isEmpty() || !QFileInfo(runtimeRoot).isDir()) {
-        return -1;
-    }
-
-    int score = 0;
-    const QDir root(runtimeRoot);
-#ifdef Q_OS_WIN
-    const QString executablePath = QDir(root.filePath(QStringLiteral("bin"))).filePath(QStringLiteral("llama-server.exe"));
-#else
-    const QString executablePath = QDir(root.filePath(QStringLiteral("bin"))).filePath(QStringLiteral("llama-server"));
-#endif
-    if (QFileInfo(executablePath).isFile()) {
-        score += 1;
-    }
-
-    const QDir modelsDir(root.filePath(QStringLiteral("models")));
-    if (!modelsDir.entryList(QStringList({QStringLiteral("*.gguf")}),
-                             QDir::Files,
-                             QDir::Name | QDir::IgnoreCase)
-             .isEmpty()) {
-        score += 2;
-    }
-
-    return score;
-}
-
 void appendCandidate(QStringList *candidates, const QString &candidate)
 {
     if (!candidates) {
@@ -148,7 +99,7 @@ QStringList splitEnvironmentPath(const QByteArray &value)
     return parts;
 }
 
-QStringList runtimeSearchCandidates()
+QStringList searchBaseCandidates()
 {
     QStringList candidates;
 
@@ -196,39 +147,54 @@ QString resolveRuntimeRoot(const LlmConfig &config, QString *source, QStringList
         if (source) {
             *source = QStringLiteral("config.llamaCppRuntimeRoot");
         }
-        return QFileInfo(explicitRoot).absoluteFilePath();
+        const QString resolved = QFileInfo(explicitRoot).absoluteFilePath();
+        appendCandidate(searchedLocations, resolved);
+        return resolved;
+    }
+    if (source) {
+        *source = QStringLiteral("applicationDirPath");
+    }
+    const QString runtimeRoot = QDir(appDirPath()).filePath(QString::fromLatin1(kRuntimeDirName));
+    appendCandidate(searchedLocations, runtimeRoot);
+    return runtimeRoot;
+}
+
+QString bundledModelsDir(const QString &runtimeRoot)
+{
+    return QDir(runtimeRoot).filePath(QStringLiteral("models"));
+}
+
+QString supplementalModelsDirIfPresent(const QString &basePath)
+{
+    const QString trimmed = basePath.trimmed();
+    if (trimmed.isEmpty()) {
+        return {};
     }
 
-    QString bestRuntimeRoot;
-    QString bestSource;
-    int bestScore = -1;
+    const QStringList candidates = {
+        QFileInfo(trimmed).absoluteFilePath(),
+        QDir(trimmed).filePath(QStringLiteral("qtllm/models")),
+        QDir(trimmed).filePath(QStringLiteral("qtllm"))
+    };
 
-    const QStringList candidates = runtimeSearchCandidates();
     for (const QString &candidate : candidates) {
-        const QString runtimeRoot = runtimeChildIfPresent(candidate);
-        const QString searched = runtimeRoot.isEmpty()
-            ? QDir(candidate).filePath(QString::fromLatin1(kRuntimeDirName))
-            : runtimeRoot;
-        appendCandidate(searchedLocations, searched);
-        if (!runtimeRoot.isEmpty()) {
-            const int score = runtimeRootScore(runtimeRoot);
-            if (score > bestScore) {
-                bestScore = score;
-                bestRuntimeRoot = runtimeRoot;
-                bestSource = candidate == appDirPath()
-                    ? QStringLiteral("applicationDirPath")
-                    : QStringLiteral("runtimeSearchPath");
-                if (score >= 3) {
-                    break;
-                }
+        const QFileInfo candidateInfo(candidate);
+        if (!candidateInfo.exists() || !candidateInfo.isDir()) {
+            continue;
+        }
+        const QString absolutePath = candidateInfo.absoluteFilePath();
+        const QString normalizedPath = QDir::fromNativeSeparators(absolutePath);
+        if (normalizedPath.endsWith(QStringLiteral("/qtllm/models"), Qt::CaseInsensitive)) {
+            return absolutePath;
+        }
+        if (normalizedPath.endsWith(QStringLiteral("/qtllm"), Qt::CaseInsensitive)) {
+            const QString childModels = QDir(absolutePath).filePath(QStringLiteral("models"));
+            if (QFileInfo(childModels).isDir()) {
+                return QFileInfo(childModels).absoluteFilePath();
             }
         }
     }
-
-    if (source) {
-        *source = bestSource;
-    }
-    return bestRuntimeRoot;
+    return {};
 }
 
 QStringList localModelFiles(const QString &modelsDir)
@@ -238,7 +204,41 @@ QStringList localModelFiles(const QString &modelsDir)
                                      QDir::Name | QDir::IgnoreCase);
 }
 
-QString findConfiguredModelPath(const LlmConfig &config, const QString &modelsDir)
+QList<QFileInfo> collectLocalModelFiles(const QStringList &modelDirs)
+{
+    QList<QFileInfo> files;
+    QStringList seenPaths;
+    for (const QString &modelsDir : modelDirs) {
+        const QDir dir(modelsDir);
+        for (const QString &fileName : localModelFiles(modelsDir)) {
+            const QFileInfo info(dir.absoluteFilePath(fileName));
+            const QString absolutePath = info.absoluteFilePath();
+            if (seenPaths.contains(absolutePath, Qt::CaseInsensitive)) {
+                continue;
+            }
+            seenPaths.append(absolutePath);
+            files.append(info);
+        }
+    }
+    return files;
+}
+
+QStringList resolveModelSearchDirs(const QString &runtimeRoot)
+{
+    QStringList dirs;
+    appendCandidate(&dirs, bundledModelsDir(runtimeRoot));
+
+    const QStringList candidates = searchBaseCandidates();
+    for (const QString &candidate : candidates) {
+        const QString supplementalDir = supplementalModelsDirIfPresent(candidate);
+        if (!supplementalDir.isEmpty()) {
+            appendCandidate(&dirs, supplementalDir);
+        }
+    }
+    return dirs;
+}
+
+QString findConfiguredModelPath(const LlmConfig &config, const QStringList &modelDirs)
 {
     const QString explicitPath = config.llamaCppModelPath.trimmed();
     if (!explicitPath.isEmpty()) {
@@ -246,23 +246,23 @@ QString findConfiguredModelPath(const LlmConfig &config, const QString &modelsDi
     }
 
     const QString modelName = config.model.trimmed();
-    const QDir dir(modelsDir);
-    const QStringList files = localModelFiles(modelsDir);
+    const QList<QFileInfo> files = collectLocalModelFiles(modelDirs);
     if (!modelName.isEmpty()) {
-        for (const QString &fileName : files) {
-            const QFileInfo info(dir.absoluteFilePath(fileName));
-            if (fileName.compare(modelName, Qt::CaseInsensitive) == 0
+        for (const QFileInfo &info : files) {
+            if (info.fileName().compare(modelName, Qt::CaseInsensitive) == 0
                 || info.completeBaseName().compare(modelName, Qt::CaseInsensitive) == 0) {
                 return info.absoluteFilePath();
             }
         }
-        return dir.absoluteFilePath(modelName);
+        if (!modelDirs.isEmpty()) {
+            return QDir(modelDirs.first()).absoluteFilePath(modelName);
+        }
     }
 
     if (files.size() == 1) {
-        return dir.absoluteFilePath(files.first());
+        return files.first().absoluteFilePath();
     }
-    return QString();
+    return {};
 }
 
 QString normalizedProvider(const QString &providerName)
@@ -487,7 +487,9 @@ LlamaCppRuntimeLayout ManagedLlamaCppRuntime::defaultLayout(const LlmConfig &con
 
     QDir root(layout.rootDir);
     layout.binDir = root.filePath(QStringLiteral("bin"));
-    layout.modelsDir = root.filePath(QStringLiteral("models"));
+    layout.bundledModelsDir = bundledModelsDir(layout.rootDir);
+    layout.modelSearchDirs = resolveModelSearchDirs(layout.rootDir);
+    layout.modelsDir = layout.bundledModelsDir;
     layout.logsDir = root.filePath(QStringLiteral("logs"));
 
     if (!config.llamaCppExecutablePath.trimmed().isEmpty()) {
@@ -502,8 +504,9 @@ LlamaCppRuntimeLayout ManagedLlamaCppRuntime::defaultLayout(const LlmConfig &con
     layout.executableAvailable = QFileInfo(layout.executablePath).isFile();
     layout.gpuBackendNames = availableGpuBackends(layout.binDir);
     layout.gpuBackendAvailable = !layout.gpuBackendNames.isEmpty();
-    layout.modelCount = localModelFiles(layout.modelsDir).size();
-    layout.resolvedModelPath = findConfiguredModelPath(config, layout.modelsDir);
+    const QList<QFileInfo> models = collectLocalModelFiles(layout.modelSearchDirs);
+    layout.modelCount = models.size();
+    layout.resolvedModelPath = findConfiguredModelPath(config, layout.modelSearchDirs);
     layout.modelAvailable = !layout.resolvedModelPath.trimmed().isEmpty()
         ? QFileInfo(layout.resolvedModelPath).isFile()
         : layout.modelCount > 0;
@@ -520,7 +523,7 @@ LlamaCppRuntimeLayout ManagedLlamaCppRuntime::defaultLayout(const LlmConfig &con
         layout.availabilityStatus = QStringLiteral("model_not_found");
         layout.availabilityMessage = layout.modelCount > 0 && !config.model.trimmed().isEmpty()
             ? QStringLiteral("Configured GGUF model not found: %1").arg(config.model.trimmed())
-            : QStringLiteral("GGUF model not found in %1").arg(layout.modelsDir);
+            : QStringLiteral("GGUF model not found in bundled or supplemental model search directories.");
     }
     return layout;
 }
@@ -567,9 +570,9 @@ bool ManagedLlamaCppRuntime::updateRuntimeAvailability(LlmConfig *config,
         && QFileInfo(resolved.resolvedModelPath).isFile()) {
         config->llamaCppModelPath = resolved.resolvedModelPath;
     } else if (config->llamaCppModelPath.trimmed().isEmpty() && resolved.modelCount == 1) {
-        const QStringList files = localModelFiles(resolved.modelsDir);
+        const QList<QFileInfo> files = collectLocalModelFiles(resolved.modelSearchDirs);
         if (!files.isEmpty()) {
-            config->llamaCppModelPath = QDir(resolved.modelsDir).absoluteFilePath(files.first());
+            config->llamaCppModelPath = files.first().absoluteFilePath();
         }
     }
     config->resolvedModelPath = !resolved.resolvedModelPath.trimmed().isEmpty()
@@ -645,7 +648,7 @@ bool ManagedLlamaCppRuntime::ensureDefaultLayout(const LlmConfig &config,
         return false;
     }
 
-    const QStringList dirs = {resolved.rootDir, resolved.binDir, resolved.modelsDir, resolved.logsDir};
+    const QStringList dirs = {resolved.rootDir, resolved.binDir, resolved.bundledModelsDir, resolved.logsDir};
     for (const QString &path : dirs) {
         QDir dir(path);
         if (!dir.exists() && !dir.mkpath(QStringLiteral("."))) {
@@ -670,18 +673,26 @@ QList<LlamaCppLocalModel> ManagedLlamaCppRuntime::listLocalModels(const LlmConfi
         return {};
     }
 
-    const QDir modelsDir(resolved.modelsDir);
-    const QStringList files = localModelFiles(resolved.modelsDir);
+    const QList<QFileInfo> files = collectLocalModelFiles(resolved.modelSearchDirs);
 
     QList<LlamaCppLocalModel> models;
     models.reserve(files.size());
-    for (const QString &fileName : files) {
-        const QString filePath = modelsDir.absoluteFilePath(fileName);
-        const QString modelId = QFileInfo(filePath).completeBaseName();
+    QHash<QString, int> displayNameCounts;
+    for (const QFileInfo &info : files) {
+        const QString baseName = info.completeBaseName().isEmpty() ? info.fileName() : info.completeBaseName();
+        displayNameCounts.insert(baseName, displayNameCounts.value(baseName) + 1);
+    }
+    for (const QFileInfo &info : files) {
+        const QString filePath = info.absoluteFilePath();
+        const QString modelId = info.completeBaseName().isEmpty() ? info.fileName() : info.completeBaseName();
+        QString displayName = modelId;
+        if (displayNameCounts.value(displayName) > 1) {
+            displayName = QStringLiteral("%1 [%2]").arg(displayName, info.absolutePath());
+        }
         models.push_back(LlamaCppLocalModel{
-            modelId.isEmpty() ? fileName : modelId,
+            modelId,
             filePath,
-            modelId.isEmpty() ? fileName : modelId
+            displayName
         });
     }
 
@@ -894,15 +905,7 @@ QString ManagedLlamaCppRuntime::resolveModelPath(const LlmConfig &config,
     if (!config.llamaCppModelPath.trimmed().isEmpty()) {
         return QFileInfo(config.llamaCppModelPath.trimmed()).absoluteFilePath();
     }
-
-    const QDir modelsDir(layout.modelsDir);
-    const QStringList files = modelsDir.entryList(QStringList({QStringLiteral("*.gguf")}),
-                                                  QDir::Files,
-                                                  QDir::Name);
-    if (files.isEmpty()) {
-        return QString();
-    }
-    return modelsDir.absoluteFilePath(files.first());
+    return findConfiguredModelPath(config, layout.modelSearchDirs);
 }
 
 } // namespace qtllm::runtime

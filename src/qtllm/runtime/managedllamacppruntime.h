@@ -15,6 +15,8 @@ struct LlamaCppRuntimeLayout
     QString rootDir;
     QString binDir;
     QString modelsDir;
+    QString bundledModelsDir;
+    QStringList modelSearchDirs;
     QString logsDir;
     QString executablePath;
     QString resolvedModelPath;
