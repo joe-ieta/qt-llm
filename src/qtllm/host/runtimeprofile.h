@@ -42,7 +42,7 @@ struct RuntimeProfile
     // positive values request an explicit layer count.
     int llamaCppGpuLayers = -1;
     int llamaCppThreadCount = 0;
-    int llamaCppStartupTimeoutMs = 30000;
+    int llamaCppStartupTimeoutMs = 180000;
     int resolvedLlamaCppGpuLayers = -1;
     int resolvedLlamaCppThreadCount = 0;
     int resolvedLlamaCppContextSize = 0;

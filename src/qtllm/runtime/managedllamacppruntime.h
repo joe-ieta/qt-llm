@@ -61,7 +61,8 @@ public:
     void stop();
 
 private:
-    bool waitForPort(int port, int timeoutMs) const;
+    bool waitForServerReady(int port, int timeoutMs, QString *errorMessage) const;
+    bool probeServerReady(int port, const QString &path, int *statusCode, QString *errorMessage) const;
     bool isPortOpen(int port) const;
     QString resolveModelPath(const LlmConfig &config, const LlamaCppRuntimeLayout &layout) const;
 

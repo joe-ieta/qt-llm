@@ -358,33 +358,29 @@ void QtLlmCoreTests::providerFactoryRejectsUnknownProvider()
     QVERIFY(unknown == nullptr);
 }
 
-void QtLlmCoreTests::managedLlamaCppRuntimeSkipsEmptyEarlierRuntimeRoot()
+void QtLlmCoreTests::managedLlamaCppRuntimeListsSupplementalQtllmModels()
 {
     const QByteArray oldZnzHome = qgetenv("ZNZ_HOME");
     const QByteArray oldIetaHome = qgetenv("IETA_HOME");
     const bool hadZnzHome = qEnvironmentVariableIsSet("ZNZ_HOME");
     const bool hadIetaHome = qEnvironmentVariableIsSet("IETA_HOME");
 
+    QTemporaryDir runtimeRoot;
+    QVERIFY(runtimeRoot.isValid());
+    QDir runtimeDir(runtimeRoot.path());
+    QVERIFY(runtimeDir.mkpath(QStringLiteral("bin")));
+    QVERIFY(runtimeDir.mkpath(QStringLiteral("models")));
+
     QTemporaryDir emptyRoot;
     QVERIFY(emptyRoot.isValid());
-    QVERIFY(QDir(emptyRoot.path()).mkpath(QStringLiteral("llama-cpp-runtime/models")));
+    QVERIFY(QDir(emptyRoot.path()).mkpath(QStringLiteral("qtllm")));
 
     QTemporaryDir validRoot;
     QVERIFY(validRoot.isValid());
     QDir validDir(validRoot.path());
-    QVERIFY(validDir.mkpath(QStringLiteral("llama-cpp-runtime/bin")));
-    QVERIFY(validDir.mkpath(QStringLiteral("llama-cpp-runtime/models")));
+    QVERIFY(validDir.mkpath(QStringLiteral("qtllm/models")));
 
-#ifdef Q_OS_WIN
-    const QString executablePath = validDir.filePath(QStringLiteral("llama-cpp-runtime/bin/llama-server.exe"));
-#else
-    const QString executablePath = validDir.filePath(QStringLiteral("llama-cpp-runtime/bin/llama-server"));
-#endif
-    QFile executable(executablePath);
-    QVERIFY(executable.open(QIODevice::WriteOnly));
-    executable.close();
-
-    const QString modelPath = validDir.filePath(QStringLiteral("llama-cpp-runtime/models/test-model.gguf"));
+    const QString modelPath = validDir.filePath(QStringLiteral("qtllm/models/test-model.gguf"));
     QFile model(modelPath);
     QVERIFY(model.open(QIODevice::WriteOnly));
     model.write("gguf");
@@ -395,6 +391,7 @@ void QtLlmCoreTests::managedLlamaCppRuntimeSkipsEmptyEarlierRuntimeRoot()
 
     LlmConfig config;
     config.providerName = QStringLiteral("llama-cpp");
+    config.llamaCppRuntimeRoot = runtimeRoot.path();
 
     qtllm::runtime::LlamaCppRuntimeLayout layout;
     QString errorMessage;
@@ -413,10 +410,22 @@ void QtLlmCoreTests::managedLlamaCppRuntimeSkipsEmptyEarlierRuntimeRoot()
     }
 
     QVERIFY2(errorMessage.isEmpty(), qPrintable(errorMessage));
-    QCOMPARE(models.size(), 1);
-    QCOMPARE(models.first().id, QStringLiteral("test-model"));
-    QCOMPARE(QFileInfo(layout.rootDir).absoluteFilePath(),
-             QFileInfo(validDir.filePath(QStringLiteral("llama-cpp-runtime"))).absoluteFilePath());
+    bool foundModel = false;
+    for (const qtllm::runtime::LlamaCppLocalModel &modelInfo : models) {
+        if (QFileInfo(modelInfo.filePath).absoluteFilePath() == QFileInfo(modelPath).absoluteFilePath()) {
+            foundModel = true;
+            QVERIFY2(modelInfo.id == QStringLiteral("test-model"),
+                     qPrintable(QStringLiteral("Unexpected model id: %1").arg(modelInfo.id)));
+            break;
+        }
+    }
+    QVERIFY(foundModel);
+    const QString actualRootDir = QFileInfo(layout.rootDir).absoluteFilePath();
+    const QString expectedRootDir = QFileInfo(runtimeRoot.path()).absoluteFilePath();
+    QVERIFY2(actualRootDir == expectedRootDir,
+             qPrintable(QStringLiteral("Unexpected runtime root: %1").arg(actualRootDir)));
+    QVERIFY(layout.modelSearchDirs.contains(QFileInfo(validDir.filePath(QStringLiteral("qtllm/models"))).absoluteFilePath(),
+                                            Qt::CaseInsensitive));
 }
 
 void QtLlmCoreTests::managedLlamaCppRuntimeDefaultsGpuLayersToAuto()
@@ -563,6 +572,23 @@ void QtLlmCoreTests::managedLlamaCppRuntimeReusesExistingServerPort()
     QTcpServer existingServer;
     QVERIFY(existingServer.listen(QHostAddress::LocalHost, 0));
     const int port = existingServer.serverPort();
+    QObject::connect(&existingServer, &QTcpServer::newConnection, &existingServer, [&existingServer]() {
+        while (existingServer.hasPendingConnections()) {
+            QTcpSocket *socket = existingServer.nextPendingConnection();
+            QObject::connect(socket, &QTcpSocket::readyRead, socket, [socket]() {
+                socket->readAll();
+                const QByteArray payload = R"({"status":"ok"})";
+                QByteArray response = "HTTP/1.1 200 OK\r\n";
+                response += "Content-Type: application/json\r\n";
+                response += "Content-Length: " + QByteArray::number(payload.size()) + "\r\n";
+                response += "Connection: close\r\n\r\n";
+                response += payload;
+                socket->write(response);
+                socket->disconnectFromHost();
+            });
+            QObject::connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+        }
+    });
 
     const QString argsPath = runtimeDir.filePath(QStringLiteral("should-not-start.txt"));
     qputenv("QTLLM_FAKE_LLAMA_ARGS_FILE", QFile::encodeName(argsPath));
@@ -582,6 +608,62 @@ void QtLlmCoreTests::managedLlamaCppRuntimeReusesExistingServerPort()
 
     QVERIFY(!QFileInfo::exists(argsPath));
     QVERIFY(existingServer.isListening());
+}
+
+void QtLlmCoreTests::managedLlamaCppRuntimeWaitsForHttpReadiness()
+{
+    QTemporaryDir runtimeRoot;
+    QVERIFY(runtimeRoot.isValid());
+
+    QDir runtimeDir(runtimeRoot.path());
+    QVERIFY(runtimeDir.mkpath(QStringLiteral("bin")));
+    QVERIFY(runtimeDir.mkpath(QStringLiteral("models")));
+
+    const QString modelPath = runtimeDir.filePath(QStringLiteral("models/test-model.gguf"));
+    QFile model(modelPath);
+    QVERIFY(model.open(QIODevice::WriteOnly));
+    model.write("gguf");
+    model.close();
+
+    QTcpServer readinessServer;
+    QVERIFY(readinessServer.listen(QHostAddress::LocalHost, 0));
+    const int port = readinessServer.serverPort();
+    int readinessProbeCount = 0;
+    ::QObject::connect(&readinessServer, &QTcpServer::newConnection, &readinessServer, [&readinessServer, &readinessProbeCount]() {
+        while (readinessServer.hasPendingConnections()) {
+            QTcpSocket *socket = readinessServer.nextPendingConnection();
+            ::QObject::connect(socket, &QTcpSocket::readyRead, socket, [socket, &readinessProbeCount]() {
+                socket->readAll();
+                ++readinessProbeCount;
+                const bool ready = readinessProbeCount >= 3;
+                const QByteArray payload = ready ? QByteArrayLiteral(R"({"status":"ok"})")
+                                                 : QByteArrayLiteral(R"({"status":"loading"})");
+                QByteArray response = ready ? QByteArrayLiteral("HTTP/1.1 200 OK\r\n")
+                                            : QByteArrayLiteral("HTTP/1.1 503 Service Unavailable\r\n");
+                response += QByteArrayLiteral("Content-Type: application/json\r\n");
+                response += "Content-Length: " + QByteArray::number(payload.size()) + "\r\n";
+                response += QByteArrayLiteral("Connection: close\r\n\r\n");
+                response += payload;
+                socket->write(response);
+                socket->disconnectFromHost();
+            });
+            ::QObject::connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+        }
+    });
+
+    LlmConfig config;
+    config.providerName = QStringLiteral("llama-cpp");
+    config.llamaCppRuntimeRoot = runtimeRoot.path();
+    config.llamaCppExecutablePath = QCoreApplication::applicationFilePath();
+    config.llamaCppModelPath = modelPath;
+    config.llamaCppServerPort = port;
+    config.llamaCppStartupTimeoutMs = 5000;
+
+    qtllm::runtime::ManagedLlamaCppRuntime runtime;
+    QString errorMessage;
+    QVERIFY2(runtime.ensureRunning(&config, &errorMessage), qPrintable(errorMessage));
+    runtime.stop();
+    QVERIFY(readinessProbeCount >= 3);
 }
 
 void QtLlmCoreTests::openAiCompatibleBuildRequestNormalizesPath()
@@ -1233,6 +1315,41 @@ int main(int argc, char *argv[])
         if (!ok || !server.listen(QHostAddress::LocalHost, static_cast<quint16>(port))) {
             return 2;
         }
+        bool readyAfterOk = false;
+        int readyAfterProbes = QString::fromLocal8Bit(qgetenv("QTLLM_FAKE_LLAMA_READY_AFTER_PROBES")).toInt(&readyAfterOk);
+        if (!readyAfterOk || readyAfterProbes <= 0) {
+            readyAfterProbes = 1;
+        }
+        int readinessProbeCount = 0;
+        const QString probeCountPath = QString::fromLocal8Bit(qgetenv("QTLLM_FAKE_LLAMA_PROBE_COUNT_FILE"));
+        QObject::connect(&server, &QTcpServer::newConnection, &server, [&server, readyAfterProbes, probeCountPath, &readinessProbeCount]() {
+            while (server.hasPendingConnections()) {
+                QTcpSocket *socket = server.nextPendingConnection();
+                QObject::connect(socket, &QTcpSocket::readyRead, socket, [socket, readyAfterProbes, probeCountPath, &readinessProbeCount]() {
+                    socket->readAll();
+                    ++readinessProbeCount;
+                    if (!probeCountPath.isEmpty()) {
+                        QFile probeCountFile(probeCountPath);
+                        if (probeCountFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                            probeCountFile.write(QByteArray::number(readinessProbeCount));
+                        }
+                    }
+
+                    const bool ready = readinessProbeCount >= readyAfterProbes;
+                    const QByteArray payload = ready ? QByteArrayLiteral(R"({"status":"ok"})")
+                                                     : QByteArrayLiteral(R"({"status":"loading"})");
+                    QByteArray response = ready ? QByteArrayLiteral("HTTP/1.1 200 OK\r\n")
+                                                : QByteArrayLiteral("HTTP/1.1 503 Service Unavailable\r\n");
+                    response += QByteArrayLiteral("Content-Type: application/json\r\n");
+                    response += "Content-Length: " + QByteArray::number(payload.size()) + "\r\n";
+                    response += QByteArrayLiteral("Connection: close\r\n\r\n");
+                    response += payload;
+                    socket->write(response);
+                    socket->disconnectFromHost();
+                });
+                QObject::connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+            }
+        });
         QEventLoop loop;
         QTimer::singleShot(30000, &loop, &QEventLoop::quit);
         loop.exec();

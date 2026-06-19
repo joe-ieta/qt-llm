@@ -20,6 +20,7 @@ namespace {
 
 constexpr const char *kRuntimeDirName = "llama-cpp-runtime";
 constexpr int kAutoGpuLayerCount = 999;
+constexpr int kDefaultStartupTimeoutMs = 180000;
 
 QStringList gpuBackendNameFilters()
 {
@@ -765,11 +766,30 @@ bool ManagedLlamaCppRuntime::ensureRunning(LlmConfig *config, QString *errorMess
         && m_activeExecutablePath == executablePath
         && m_activeModelPath == modelPath
         && m_activePort == port) {
-        return true;
+        const int timeoutMs = config->llamaCppStartupTimeoutMs > 0
+            ? config->llamaCppStartupTimeoutMs
+            : kDefaultStartupTimeoutMs;
+        return waitForServerReady(port, timeoutMs, errorMessage);
     }
 
     stop();
     if (isPortOpen(port)) {
+        const int timeoutMs = config->llamaCppStartupTimeoutMs > 0
+            ? config->llamaCppStartupTimeoutMs
+            : kDefaultStartupTimeoutMs;
+        if (!waitForServerReady(port, timeoutMs, errorMessage)) {
+            logging::QtLlmLogger::instance().warn(
+                QStringLiteral("llm.runtime"),
+                QStringLiteral("Existing llama.cpp server on configured port is not ready"),
+                logging::LogContext(),
+                QJsonObject{{QStringLiteral("baseUrl"), defaultBaseUrl(port)},
+                            {QStringLiteral("runtimeRoot"), layout.rootDir},
+                            {QStringLiteral("modelPath"), modelPath},
+                            {QStringLiteral("port"), port},
+                            {QStringLiteral("error"), errorMessage ? *errorMessage : QString()}});
+            return false;
+        }
+
         logging::QtLlmLogger::instance().info(
             QStringLiteral("llm.runtime"),
             QStringLiteral("Reusing existing llama.cpp server on configured port"),
@@ -833,15 +853,15 @@ bool ManagedLlamaCppRuntime::ensureRunning(LlmConfig *config, QString *errorMess
         return false;
     }
 
-    const int timeoutMs = config->llamaCppStartupTimeoutMs > 0 ? config->llamaCppStartupTimeoutMs : 30000;
-    if (!waitForPort(port, timeoutMs)) {
+    const int timeoutMs = config->llamaCppStartupTimeoutMs > 0
+        ? config->llamaCppStartupTimeoutMs
+        : kDefaultStartupTimeoutMs;
+    if (!waitForServerReady(port, timeoutMs, errorMessage)) {
         const QByteArray output = m_process->readAll();
         stop();
         if (errorMessage) {
-            *errorMessage = QStringLiteral("llama.cpp server did not open port %1 within %2 ms. %3")
-                                .arg(port)
-                                .arg(timeoutMs)
-                                .arg(QString::fromUtf8(output.left(2048)));
+            *errorMessage = QStringLiteral("%1 %2")
+                                .arg(*errorMessage, QString::fromUtf8(output.left(2048)));
         }
         return false;
     }
@@ -867,19 +887,111 @@ void ManagedLlamaCppRuntime::stop()
     m_activePort = 0;
 }
 
-bool ManagedLlamaCppRuntime::waitForPort(int port, int timeoutMs) const
+bool ManagedLlamaCppRuntime::waitForServerReady(int port, int timeoutMs, QString *errorMessage) const
 {
     QElapsedTimer timer;
     timer.start();
+    QString lastError;
     while (timer.elapsed() < timeoutMs) {
-        QTcpSocket socket;
-        socket.connectToHost(QStringLiteral("127.0.0.1"), static_cast<quint16>(port));
-        if (socket.waitForConnected(250)) {
-            socket.disconnectFromHost();
+        int statusCode = 0;
+        if (probeServerReady(port, QStringLiteral("/health"), &statusCode, &lastError)) {
+            if (errorMessage) {
+                errorMessage->clear();
+            }
             return true;
         }
-        QThread::msleep(100);
+
+        if (statusCode == 404 || statusCode == 405) {
+            if (probeServerReady(port, QStringLiteral("/v1/models"), &statusCode, &lastError)) {
+                if (errorMessage) {
+                    errorMessage->clear();
+                }
+                return true;
+            }
+        }
+
+        QThread::msleep(250);
         QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+    }
+
+    if (errorMessage) {
+        *errorMessage = QStringLiteral("llama.cpp server did not become HTTP-ready on port %1 within %2 ms. Last readiness probe: %3")
+                            .arg(port)
+                            .arg(timeoutMs)
+                            .arg(lastError.isEmpty() ? QStringLiteral("<no response>") : lastError);
+    }
+    return false;
+}
+
+bool ManagedLlamaCppRuntime::probeServerReady(int port,
+                                              const QString &path,
+                                              int *statusCode,
+                                              QString *errorMessage) const
+{
+    if (statusCode) {
+        *statusCode = 0;
+    }
+
+    QTcpSocket socket;
+    socket.connectToHost(QStringLiteral("127.0.0.1"), static_cast<quint16>(port));
+    if (!socket.waitForConnected(250)) {
+        if (errorMessage) {
+            *errorMessage = socket.errorString();
+        }
+        return false;
+    }
+
+    const QByteArray request = QByteArrayLiteral("GET ") + path.toUtf8()
+        + QByteArrayLiteral(" HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    socket.write(request);
+    if (!socket.waitForBytesWritten(250)) {
+        if (errorMessage) {
+            *errorMessage = socket.errorString();
+        }
+        socket.disconnectFromHost();
+        return false;
+    }
+
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+    QByteArray response;
+    QElapsedTimer readTimer;
+    readTimer.start();
+    while (readTimer.elapsed() < 1000) {
+        if (socket.waitForReadyRead(50)) {
+            response.append(socket.readAll());
+            if (response.contains("\r\n")) {
+                break;
+            }
+        }
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+    }
+    socket.disconnectFromHost();
+
+    const int lineEnd = response.indexOf('\n');
+    const QByteArray statusLine = (lineEnd >= 0 ? response.left(lineEnd) : response).trimmed();
+    const QList<QByteArray> parts = statusLine.split(' ');
+    bool ok = false;
+    const int code = parts.size() >= 2 ? parts.at(1).toInt(&ok) : 0;
+    if (!ok) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("Invalid HTTP readiness response from %1: %2")
+                                .arg(path, QString::fromUtf8(statusLine.left(160)));
+        }
+        return false;
+    }
+
+    if (statusCode) {
+        *statusCode = code;
+    }
+    if (code >= 200 && code < 300) {
+        if (errorMessage) {
+            errorMessage->clear();
+        }
+        return true;
+    }
+    if (errorMessage) {
+        *errorMessage = QStringLiteral("HTTP %1 from %2").arg(code).arg(path);
     }
     return false;
 }

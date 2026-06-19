@@ -20,10 +20,11 @@ private slots:
     void providerFactoryCreatesKnownProviders();
     void providerFactoryCreatesVendorAliases();
     void providerFactoryRejectsUnknownProvider();
-    void managedLlamaCppRuntimeSkipsEmptyEarlierRuntimeRoot();
+    void managedLlamaCppRuntimeListsSupplementalQtllmModels();
     void managedLlamaCppRuntimeDefaultsGpuLayersToAuto();
     void managedLlamaCppRuntimeCpuOnlyPolicyDisablesGpuLayers();
     void managedLlamaCppRuntimeReusesExistingServerPort();
+    void managedLlamaCppRuntimeWaitsForHttpReadiness();
     void openAiCompatibleBuildRequestNormalizesPath();
     void openAiCompatibleBuildRequestAnthropic();
     void openAiCompatibleBuildRequestGoogle();
