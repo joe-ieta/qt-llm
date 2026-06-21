@@ -205,6 +205,8 @@ MainWindow::MainWindow(const std::shared_ptr<skills::SkillRegistry> &skillRegist
     connectPersistenceSignals();
 }
 
+MainWindow::~MainWindow() = default;
+
 void MainWindow::onDetectLanguageClicked()
 {
     applyLanguageDetectBinding();

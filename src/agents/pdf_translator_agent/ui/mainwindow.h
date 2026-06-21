@@ -44,6 +44,7 @@ public:
                         const std::shared_ptr<skills::ModelRouter> &modelRouter,
                         const std::shared_ptr<skills::mcp::McpGateway> &mcpGateway,
                         QWidget *parent = nullptr);
+    ~MainWindow() override;
 
 private slots:
     void onDetectLanguageClicked();
