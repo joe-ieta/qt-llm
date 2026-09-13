@@ -1,25 +1,20 @@
 # 当前待办
 
-本文只记录仍然有效的待办。
+基础能力优化工作包 QTL-00 至 QTL-10 已完成。以下内容是后续增强项，不影响当前公开接口和发布矩阵结论。
 
-## Host App 集成
+## 工程与平台
 
-- 增加一个最小外部 Host App 示例，演示 `RuntimeFacade` 的完整接入。
-- 梳理哪些接口属于稳定公共 API，哪些属于高级内部 API。
+- 在 Linux 和 macOS 建立与 Windows 等级一致的 Qt5/Qt6 构建与安装包验证。
+- 评估逐步显式标注全部 Windows 公共 ABI，最终移除 `WINDOWS_EXPORT_ALL_SYMBOLS` 兼容层。
+- 发布前确定下一版本号，并同步 CMake 版本、发布说明、标签和归档名称。
 
-## 本地 llama.cpp
+## 外部运行环境
 
-- 增加运行态安装/下载/校验方案。
-- 在配置 UI 中统一展示 runtime root、模型数量、当前模型、不可用原因。
-- 增加端口占用、模型缺失、可执行文件缺失的用户可读诊断。
-- 增强自动运行规划：补充真实 VRAM/RAM 探测、量化格式识别和更细粒度的部分 offload 诊断。
+- 在可用的真实 MCP stdio 与 HTTP-like server 环境中补充端到端冒烟。
+- 在真实 OpenAI-compatible、Ollama、vLLM 和 llama.cpp 服务上维护可选集成测试。
+- 增加 llama.cpp runtime 下载、校验、安装、升级和故障修复工具。
 
-## 文档
+## 上层迁移
 
-- 文档重整后，继续按代码变动维护活跃文档。
-- 后续发布说明需要从当前中文文档结构出发生成。
-
-## 验证
-
-- 增加 Linux 环境下的本地 runtime 发现测试。
-- 为 Host App facade 增加更多阻塞/非阻塞边界测试。
+- CoReader 按独立工作包迁移到正式 CMake 目标和推荐请求入口。
+- CoReader 的业务提示词、文档处理、RAG、任务编排和 UI 继续保留在宿主侧。

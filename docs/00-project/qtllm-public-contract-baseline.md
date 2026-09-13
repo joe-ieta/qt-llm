@@ -218,7 +218,7 @@
 | 组合 | 构建模式 | 当前证据 | 状态 |
 | --- | --- | --- | --- |
 | Qt 6.10.3 + MSVC 2022 x64 | qt-llm 独立 CMake Release | 核心库、应用、工具、Agent、测试全部构建；CTest 通过 | 已验证 |
-| Qt 5 | qt-llm 独立 CMake | CMake 选择逻辑已支持，当前主机未提供本轮构建证据 | 待验证 |
+| Qt 5.15.2 + MSVC 2022 x64 | qt-llm 独立 CMake | STATIC/SHARED、CTest、安装包与源码消费者均由当前发布门禁验证 | 已验证 |
 | CoReader + Qt6 | 源码收集到 `coreader_qtllm_bridge` | 实际 CMake 和调用代码已映射 | 当前使用 |
 | CoReader + 正式 qt-llm target | `add_subdirectory` 或 `find_package` | 尚未提供 | QTL-01 |
 | CoReader + Qt5 | 不属于当前 CoReader 构建基线 | 无 | 不承诺 |
@@ -267,3 +267,8 @@
 - CoReader 当前构建、调用、日志、本地模型、清理和兼容垫片依赖均已映射。
 - QTL-01、QTL-02、QTL-03 可以在本基线约束下并行启动。
 
+## 11. 当前开发线复核（2026-09-13）
+
+本文件前述接口、默认值和 v0.2.10 基线提交用于兼容追溯。其后的 QTL-01 至 QTL-10 已以增量方式完成，未删除既有入口；新增请求句柄、结构化输出、上下文窗口、工具治理、运行实例服务、事件接收端和 CMake 组件详见当前集成文档。
+
+当前发布前矩阵为 Qt5/Qt6 × STATIC/SHARED 四组，每组 CTest 6/6；安装包消费者 20/20；`add_subdirectory` 消费者 4/4；公开头文件安装与编译检查通过。当前开发线尚未创建 v0.2.10 之后的新正式版本。

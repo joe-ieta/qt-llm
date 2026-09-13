@@ -57,7 +57,7 @@
 3. 活动 HTTP 传输被中止；重试退避计时器被停止。
 4. 请求最终通过一次 `requestFinished` 返回 `Canceled`，并通过旧 `errorOccurred` 兼容转接。
 
-当前 `QtLLMClient` 不建立待启动请求队列，并发提交会被明确拒绝，因此不存在取消后仍自动启动的排队请求。Provider 选择和受管运行时启动仍是同步准备过程；控制权返回前不可抢占，这一限制不会被误报为已完成取消。独立句柄、跨线程投递和可观察等待状态由 QTL-04 继续处理。
+当前 `QtLLMClient` 不建立待启动请求队列，并发提交会被明确拒绝，因此不存在取消后仍自动启动的排队请求。Provider 选择和受管运行时启动仍是同步准备过程；控制权返回前不可抢占，这一限制不会被误报为已完成取消。独立句柄、并行请求和精确取消由 `RuntimeFacade::sendAsync()` 与 `RuntimeRequestHandle` 提供；本节仍描述单个 `QtLLMClient` 的单活动请求边界。
 
 ## 6. 重试与流重置
 
@@ -85,7 +85,7 @@
 
 | 环境 | 配置 | 全量构建 | CTest |
 | --- | --- | --- | --- |
-| Qt 6.10.3 / MSVC 2022 x64 | 通过 | Release 通过 | `1/1` 通过 |
-| Qt 5.15.2 / MSVC 2022 x64 | 通过 | Release 通过；仅有 Qt5 与新版 STL 的既有弃用告警 | `1/1` 通过 |
+| Qt 6.10.3 / MSVC 2022 x64 | 通过 | STATIC/SHARED Release 通过 | 每组 `6/6` 通过 |
+| Qt 5.15.2 / MSVC 2022 x64 | 通过 | STATIC/SHARED Release 通过，告警门禁通过 | 每组 `6/6` 通过 |
 
 回归测试覆盖重试后响应缓冲隔离，以及退避期间取消不再启动下一次请求。工具失败的唯一终态由 `QtLLMClient::finishRequest()` 统一出口保证。

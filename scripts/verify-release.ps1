@@ -21,6 +21,10 @@ if ([string]::IsNullOrWhiteSpace($BuildRoot)) {
 }
 $BuildRoot = [System.IO.Path]::GetFullPath($BuildRoot)
 $ctestPath = Join-Path (Split-Path -Parent $CMakePath) 'ctest.exe'
+$powershellPath = Join-Path $PSHOME 'powershell.exe'
+if (-not (Test-Path -LiteralPath $powershellPath)) {
+    $powershellPath = Join-Path $PSHOME 'pwsh.exe'
+}
 $logRoot = Join-Path $BuildRoot 'logs'
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
@@ -113,6 +117,15 @@ function Assert-InstalledPackage([string]$InstallRoot) {
         Assert-PathExists (Join-Path $packageRoot $requiredFile) 'Installed package metadata'
     }
     Assert-PathExists (Join-Path $InstallRoot 'include\qtllm_global.h') 'Installed export header'
+    $installedHeaderRoot = Join-Path $InstallRoot 'include'
+    $trackedHeaders = @(& git -C $repoRoot ls-files 'src/qtllm/*.h' 'src/qtllm/**/*.h')
+    if ($LASTEXITCODE -ne 0 -or $trackedHeaders.Count -eq 0) {
+        throw 'Unable to enumerate tracked public headers.'
+    }
+    foreach ($trackedHeader in $trackedHeaders) {
+        $relativeHeader = $trackedHeader.Substring('src/qtllm/'.Length).Replace('/', '\')
+        Assert-PathExists (Join-Path $installedHeaderRoot $relativeHeader) 'Installed public header'
+    }
     return $packageRoot
 }
 
@@ -140,10 +153,17 @@ function Find-Executable([string]$BuildDirectory, [string]$Name) {
 Assert-PathExists $repoRoot 'Repository root'
 Assert-PathExists $CMakePath 'CMake executable'
 Assert-PathExists $ctestPath 'CTest executable'
+Assert-PathExists $powershellPath 'PowerShell executable'
 Assert-PathExists (Join-Path $Qt5Root 'bin\Qt5Core.dll') 'Qt5 runtime'
 Assert-PathExists (Join-Path $Qt6Root 'bin\Qt6Core.dll') 'Qt6 runtime'
 [System.IO.Directory]::CreateDirectory($BuildRoot) | Out-Null
 [System.IO.Directory]::CreateDirectory($logRoot) | Out-Null
+$null = Invoke-Checked 'documentation-check' $powershellPath @(
+    '-NoProfile',
+    '-ExecutionPolicy', 'Bypass',
+    '-File', (Join-Path $repoRoot 'scripts\check-docs.ps1'),
+    '-RepoRoot', $repoRoot
+)
 
 $qtVariants = @(
     @{ Name = 'qt6'; Root = [System.IO.Path]::GetFullPath($Qt6Root) },
@@ -154,7 +174,8 @@ $packageConsumers = @(
     @{ Name = 'core'; Source = 'tests\consumers\package-core'; Exe = 'qtllm_core_package_consumer.exe' },
     @{ Name = 'components'; Source = 'tests\consumers\package-components'; Exe = 'qtllm_optional_components_consumer.exe' },
     @{ Name = 'conversation'; Source = 'tests\consumers\package-conversation'; Exe = 'qtllm_conversation_consumer.exe' },
-    @{ Name = 'aggregate'; Source = 'tests\consumers\package'; Exe = 'qtllm_package_consumer.exe' }
+    @{ Name = 'aggregate'; Source = 'tests\consumers\package'; Exe = 'qtllm_package_consumer.exe' },
+    @{ Name = 'public-api'; Source = 'tests\consumers\public-api'; Exe = 'qtllm_public_api_consumer.exe' }
 )
 
 $sourceMatrixCount = 0
@@ -226,7 +247,7 @@ try {
                     "-DCMAKE_PREFIX_PATH=$qtPrefix",
                     "-DQtLlm_DIR=$(Convert-ToCMakePath $packageRoot)"
                 )
-                if ($consumer.Name -eq 'aggregate') {
+                if ($consumer.Name -in @('aggregate', 'public-api')) {
                     $consumerArguments += "-DQTLLM_EXPECTED_VERSION=$configuredVersion"
                 }
                 $null = Invoke-Checked "$matrixName-$($consumer.Name)-configure" $CMakePath $consumerArguments
@@ -269,7 +290,7 @@ try {
 Write-Host "[PASS] release verification completed"
 Write-Host "       version: $resolvedVersion"
 Write-Host "       source matrices: $sourceMatrixCount/4"
-Write-Host "       installed package consumers: $packageConsumerCount/16"
+Write-Host "       installed package consumers: $packageConsumerCount/20"
 Write-Host "       add_subdirectory consumers: $subdirectoryConsumerCount/4"
 Write-Host "       compiler/linker warning gate: passed"
 Write-Host "       logs: $logRoot"

@@ -12,7 +12,7 @@ QTL-09 当前提供五个正式消费目标：
 
 源码树内同时提供等价别名 `qtllm::core` 和 `qtllm::qtllm`。既有宿主无需修改 target 名称；希望只使用消息类型、上下文窗口、HTTP 执行、供应商协议、流解析和结构化输出的宿主可改用 `QtLlm::Core`。
 
-`QtLlm::Core` 不包含 `QtLLMClient`、会话仓库、工具/MCP、本地进程管理、诊断适配器或应用资源。`ToolEnabledChatEntry` 因组合会话与工具能力暂留兼容聚合目标，不属于独立 Tools 组件。
+`QtLlm::Core` 不包含 `QtLLMClient`、会话仓库、工具/MCP、本地进程管理、诊断适配器或应用资源。`QtLLMClient`、`RuntimeFacade`、`ConversationClient` 和 `ToolEnabledChatEntry` 由 `QtLlm::Conversation` 提供。
 
 不要在同一目标中同时链接 `QtLlm::Core` 和 `QtLlm::QtLlm`。聚合目标已经包含核心实现，重复链接没有收益。
 

@@ -1,94 +1,94 @@
 # qt-llm
 
-qt-llm 是面向 Qt/C++ 应用的 LLM 集成基础库。它把模型访问、provider 封装、流式响应、本地运行态托管、会话管理、工具调用、MCP 和运行观测能力集中到一个可嵌入的 Qt 工程中。
+qt-llm 是面向 Qt/C++ 桌面应用的可嵌入 LLM 基础库。它统一提供模型请求、流式响应、结构化输出、请求取消与终态、Provider 协议、本地 llama.cpp 运行时、会话、工具/MCP 和可选诊断能力，使宿主应用专注于 UI、业务状态和自己的数据。
 
-项目定位很直接：让外部 Qt 应用不用重复理解各类 LLM 服务细节，只通过稳定的 Qt/C++ 接口接入模型能力。
+## 支持范围
 
-## 主要功能
+- Qt 5.15.2 与 Qt 6.10.3。
+- CMake 3.16 及以上、C++17、MSVC x64。
+- STATIC 与 SHARED 库。
+- OpenAI、OpenAI-compatible、Ollama、vLLM 和托管 llama.cpp。
+- 安装包 `find_package` 与源码 `add_subdirectory` 两种集成方式。
 
-- OpenAI、OpenAI-compatible、Ollama、vLLM、llama.cpp provider。
-- 内置托管 llama.cpp，本地发现 `llama-cpp-runtime` 和 `.gguf` 模型。
-- `RuntimeFacade`：面向 Host App 的简单单轮调用接口。
-- `QtLLMClient`：底层请求执行、流式 token、provider payload、取消请求。
-- `ConversationClient`：多会话、历史、profile、快照和持久化。
-- 工具调用层：工具定义、选择、执行、协议适配。
-- MCP 支持：MCP server 注册、同步、调用。
-- ToolsInside：运行 trace、事件、span、artifact、tool call 记录和查询。
-- ToolStudio：工具目录、导入导出、工作区和元数据管理。
-- 示例 App：simple_chat、multi_client_chat、mcp_server_manager、tools_inside、toolstudio。
-- 参考 Agent：pdf_translator_agent。
+Windows 是当前完整发布验证环境。Linux 兼容性需要保持，但尚未纳入同等级自动化矩阵。
 
-## 典型使用方式
+## 选择入口
 
-普通 Host App 推荐使用：
+| 使用场景 | 推荐入口 | CMake 目标 |
+| --- | --- | --- |
+| 普通宿主、并行请求、精确取消 | `qtllm::host::RuntimeFacade` / `RuntimeRequestHandle` | `QtLlm::Conversation` |
+| 多会话、历史、快照、可选持久化 | `qtllm::chat::ConversationClient` | `QtLlm::Conversation` |
+| 工具调用或 MCP 聊天 | `qtllm::tools::ToolEnabledChatEntry` | `QtLlm::Conversation` |
+| 高级请求执行与 Provider 控制 | `qtllm::QtLLMClient` | `QtLlm::Conversation` |
+| 只使用消息、协议、上下文或结构化输出类型 | 对应轻量服务和数据类型 | `QtLlm::Core` |
+| 兼容既有完整接入 | 原有公开接口 | `QtLlm::QtLlm` |
+
+普通宿主不应直接组装 `ProviderFactory`、`HttpExecutor`、具体 Provider 或本地进程管理对象。
+
+## 安装包接入
+
+```cmake
+find_package(QtLlm 0.2.10 CONFIG REQUIRED COMPONENTS Conversation)
+
+target_link_libraries(my_app PRIVATE QtLlm::Conversation)
+```
+
+将安装前缀加入 `CMAKE_PREFIX_PATH`，或设置 `QtLlm_DIR=<安装目录>/lib/cmake/QtLlm`。既有工程可继续链接 `QtLlm::QtLlm`。
+
+## 最小异步调用
 
 ```cpp
-qtllm::host::RuntimeFacade runtime;
+#include <host/runtimefacade.h>
+#include <host/runtimerequesthandle.h>
 
 qtllm::host::RuntimeProfile profile;
 profile.providerName = QStringLiteral("llama-cpp");
 profile.model = selectedModelId;
 profile.llamaCppModelPath = selectedModelPath;
-runtime.setProfile(profile);
+
+runtimeFacade->setProfile(profile);
 
 qtllm::host::ChatRequest request;
-request.systemPrompt = QStringLiteral("You are a helpful assistant.");
 request.userPrompt = userText;
-runtime.send(request);
+
+auto *handle = runtimeFacade->sendAsync(request);
+connect(handle, &qtllm::host::RuntimeRequestHandle::tokenReceived,
+        this, &MyWindow::appendToken);
+connect(handle, &qtllm::host::RuntimeRequestHandle::finished,
+        this, [handle](const qtllm::host::ChatResult &result) {
+            // result.success / result.canceled / result.error / result.response
+            handle->deleteLater();
+        });
 ```
 
-使用层级选择：
-
-- 简单模型调用：`qtllm::host::RuntimeFacade`
-- 高级请求控制：`QtLLMClient`
-- 多会话聊天：`ConversationClient`
-- 工具调用或 MCP：`ToolEnabledChatEntry`
-
-普通 Host App 不建议直接使用 `ProviderFactory`、`HttpExecutor`、`ManagedLlamaCppRuntime` 或具体 provider 类。
-
-## 本地 llama.cpp
-
-当选择 `llama-cpp` provider 时，qt-llm 可以托管 `llama-server`。默认查找顺序：
-
-1. 当前程序目录下的 `llama-cpp-runtime`
-2. `ZNZ_HOME`、`ZNZ_BLACKBOARD`、`YIDA_HOME`、`YIDA_BLACKBOARD`、`IETA_HOME`、`IETA_BLACKBOARD` 指向目录下的 `llama-cpp-runtime`
-3. Linux：`/home/ieta/LLMs/llama-cpp-runtime`、`/home/IETA/LLMs/llama-cpp-runtime`
-4. Windows：所有磁盘根目录下的 `LLMs/llama-cpp-runtime`
-
-模型放在运行态目录的 `models/` 下，多个 `.gguf` 模型由 App 展示列表并让用户选择，选择结果写入 `llamaCppModelPath`。
-
-managed runtime 默认使用自动运行规划：Host App 只需选择 provider 和模型，qt-llm 会根据高层策略字段、模型文件大小、GPU backend 是否存在和 CPU 线程数派生 `--gpu-layers`、`--threads`、`--ctx-size`。普通 Host App 推荐暴露 `auto` / `cpu-only` / `prefer-gpu` 这类策略，不直接要求用户填写 GPU layers、线程数等底层启动参数；这些字段仍作为专家覆盖保留。
-
-## 工程结构
-
-```text
-src/qtllm/                    核心库
-src/apps/                     示例和工具 App
-src/agents/                   参考业务 Agent
-tests/qtllm_tests/            Qt 单元测试
-docs/                         当前中文文档
-docs/archive/                 历史文档归档
-```
+UI 主线程的新代码应使用 `sendAsync()`。`send()`、`sendBlocking()`、`cancel()` 和原有信号继续保留，用于兼容既有调用方。
 
 ## 构建
 
-项目当前基线是 Qt + CMake + C++17。
+Qt6 示例：
 
 ```powershell
-cmake -S . -B build
-cmake --build build --config Release
+$env:QTVERSION = '6'
+$env:QT6_ROOT = 'E:\Qt\6.10.3\msvc2022_64'
+.\target_wrapper.bat "E:\Qt\Tools\CMake_64\bin\cmake.exe" -S . -B build-qt6 -DQTLLM_LIBRARY_TYPE=STATIC -DQTLLM_BUILD_APPS=ON -DQTLLM_BUILD_TESTS=ON
+.\target_wrapper.bat "E:\Qt\Tools\CMake_64\bin\cmake.exe" --build build-qt6 --config Release
+.\target_wrapper.bat "E:\Qt\Tools\CMake_64\bin\ctest.exe" --test-dir build-qt6 -C Release --output-on-failure
 ```
 
-测试入口：
+完整发布前验证：
 
 ```powershell
-./build/bin/Release/qtllm_tests.exe
+.\scripts\verify-release.ps1 -ExpectedVersion 0.2.10
 ```
 
-## 文档入口
+该门禁串行验证 Qt5/Qt6、STATIC/SHARED、源码测试、安装包消费、全部公开头文件和 `add_subdirectory` 集成。
 
-- 顶层约束：[AI_RULES.md](./AI_RULES.md)
-- 文档索引：[docs/README.md](./docs/README.md)
-- Host App 集成：[docs/20-integration/host-app-guide.md](./docs/20-integration/host-app-guide.md)
-- 本地 llama.cpp：[docs/20-integration/local-llamacpp-guide.md](./docs/20-integration/local-llamacpp-guide.md)
-- 故障处理：[docs/50-reference/troubleshooting.md](./docs/50-reference/troubleshooting.md)
+## 文档
+
+- [文档入口](./docs/README.md)
+- [对外开发接口与集成](./docs/20-integration/public-api-guide.md)
+- [Host App 集成](./docs/20-integration/host-app-guide.md)
+- [CMake 组件](./docs/30-development/cmake-components.md)
+- [构建与测试](./docs/30-development/build-and-test.md)
+- [发布前验证](./docs/30-development/release-validation.md)
+- [API 索引](./docs/50-reference/api-index.md)

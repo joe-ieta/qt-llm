@@ -62,3 +62,21 @@ qt-llm 的 managed runtime 会在启动前检查目标端口，端口已有 serv
 ## 文档和代码不一致
 
 以代码为准，并同步更新对应文档。历史文档在 `docs/archive/`，不作为当前状态依据。
+
+## 找不到 QtLlm CMake 包
+
+检查：
+
+1. `CMAKE_PREFIX_PATH` 是否指向安装前缀，而不是单个库文件。
+2. 或者 `QtLlm_DIR` 是否指向 `<安装目录>/lib/cmake/QtLlm`。
+3. Qt 主版本是否与 qt-llm 产物一致。
+4. STATIC/SHARED 产物是否来自当前构建目录对应的安装结果。
+5. 宿主是否使用 `QtLlm::Conversation` 等正式目标，而不是收集内部源码。
+
+## Windows DLL 启动失败
+
+将 qt-llm 安装目录的 `bin` 和对应 Qt 的 `bin` 放入运行时 `PATH`。不要混用 Qt5/Qt6 或 Debug/Release DLL。编译成功但程序无法启动通常是运行时搜索路径问题，不是头文件或 CMake 包发现问题。
+
+## 发布验证失败
+
+查看 `build-release-verification/logs` 或传入 `-BuildRoot` 下的 `logs`。脚本只对 `qtllm_tests.exe` 的已知单次 LNK1104 文件占用执行一次定向重试；其他编译、链接、测试、文档或版本错误都需要实际修复。

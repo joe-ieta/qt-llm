@@ -217,7 +217,7 @@
 
 ### QTL-09 库目标与可选组件分层
 
-状态：进行中。已完成 Core、Diagnostics、Tools、LocalRuntime 物理目标、兼容聚合目标、组件化包发现、静态/共享构建开关、独立消费测试和公开头文件安装补全；Conversation 目标、聚合去重与共享构建矩阵待后续阶段完成。
+状态：已完成。Core、Diagnostics、Tools、LocalRuntime、Conversation 物理目标、兼容聚合目标、组件化包发现、STATIC/SHARED、公开头文件安装及全部消费矩阵均已完成。
 
 目标：在公共契约稳定后降低最小集成依赖，保留兼容聚合 target。
 

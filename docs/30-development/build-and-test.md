@@ -2,41 +2,74 @@
 
 ## 基线
 
-- C++17
-- Qt 5.x / Qt 6.x（通过 CMake 自动匹配）
-- Windows 是当前主要验证环境
-- Linux 兼容性需要保持
+- CMake 3.16 及以上。
+- C++17。
+- Qt 5.15.2 / Qt 6.10.3。
+- Windows MSVC x64 是当前完整验证环境。
+- `QTLLM_LIBRARY_TYPE=STATIC` 或 `SHARED`。
 
-## Windows 构建
+## Windows 环境包装器
 
-在已配置 MSVC 和 Qt 环境的终端中：
+根目录 `target_wrapper.bat` 选择 Qt、设置 `PATH` 和 `CMAKE_PREFIX_PATH`，并执行其后的命令。它不会修改父 PowerShell 会话。
 
-```powershell
-target_wrapper.bat cmake -S . -B build -DQTLLM_BUILD_APPS=ON -DQTLLM_BUILD_TESTS=ON
-target_wrapper.bat cmake --build build --config Release
-```
-
-如需指定 Qt 版本，可设置 `QTVERSION` 与对应路径变量（例如 `QTVERSION=6` + `QT6_ROOT`，或 `QTVERSION=5` + `QT5_ROOT`）。
-
-`target_wrapper.bat` 会注入对应版本的 Qt 工具链与 `CMAKE_PREFIX_PATH`，并保持 `qt-creator`/MSBuild 可复用。
-
-## 一行式全量验证（推荐）
+Qt6：
 
 ```powershell
-cmd /c "target_wrapper.bat cmake -S . -B build -DQTLLM_BUILD_APPS=ON -DQTLLM_BUILD_TESTS=ON && cmake --build build --config Release && ctest --test-dir build -C Release --output-on-failure"
+$env:QTVERSION = '6'
+$env:QT6_ROOT = 'E:\Qt\6.10.3\msvc2022_64'
+.\target_wrapper.bat "E:\Qt\Tools\CMake_64\bin\cmake.exe" -S . -B build-qt6 -DQTLLM_LIBRARY_TYPE=STATIC -DQTLLM_BUILD_APPS=ON -DQTLLM_BUILD_TESTS=ON
+.\target_wrapper.bat "E:\Qt\Tools\CMake_64\bin\cmake.exe" --build build-qt6 --config Release
+.\target_wrapper.bat "E:\Qt\Tools\CMake_64\bin\ctest.exe" --test-dir build-qt6 -C Release --output-on-failure
 ```
 
-该命令完成“配置 + Release 编译 + 全量测试（含 qtllm_tests）”一次性执行。
-
-## 测试
+Qt5：
 
 ```powershell
-target_wrapper.bat cmake --build build --config Release --target qtllm_tests
-./build/bin/Release/qtllm_tests.exe
+$env:QTVERSION = '5'
+$env:QT5_ROOT = 'E:\Qt\5.15.2\msvc2019_64'
+.\target_wrapper.bat "E:\Qt\Tools\CMake_64\bin\cmake.exe" -S . -B build-qt5 -DQTLLM_LIBRARY_TYPE=STATIC -DQTLLM_BUILD_APPS=ON -DQTLLM_BUILD_TESTS=ON
+.\target_wrapper.bat "E:\Qt\Tools\CMake_64\bin\cmake.exe" --build build-qt5 --config Release
+.\target_wrapper.bat "E:\Qt\Tools\CMake_64\bin\ctest.exe" --test-dir build-qt5 -C Release --output-on-failure
 ```
 
-测试覆盖 provider factory、OpenAI-compatible 协议、stream parser、MCP、tool execution、日志轮转、紧凑 ID、本地 llama.cpp runtime 发现等。
+一个构建目录只能绑定一个 Qt 主版本和一种库类型。
+
+## 常用选项
+
+| 选项 | 值 | 说明 |
+| --- | --- | --- |
+| `QTLLM_LIBRARY_TYPE` | `STATIC` / `SHARED` | 库形态 |
+| `QTLLM_BUILD_APPS` | `ON` / `OFF` | 示例与工具应用 |
+| `QTLLM_BUILD_TESTS` | `ON` / `OFF` | 测试目标 |
+| `QTLLM_ENABLE_INSTALL` | `ON` / `OFF` | 安装与包导出规则 |
+
+作为子项目时，应用、测试和安装默认关闭，避免污染宿主工程。
+
+## 标准检查
+
+只检查活跃文档：
+
+```powershell
+.\scripts\check-docs.ps1
+```
+
+完整发布前验证：
+
+```powershell
+.\scripts\verify-release.ps1 -ExpectedVersion 0.2.10
+```
+
+完整门禁串行覆盖：
+
+- Qt5/Qt6 × STATIC/SHARED 四组源码配置、全量构建、安装和每组 6 项 CTest。
+- 每个安装包的 Core、组件、Conversation、聚合和全部公开头文件消费者，共 20/20。
+- 四组 `add_subdirectory` 消费者。
+- 安装头文件和 CMake 导出元数据完整性。
+- 精确版本匹配。
+- MSVC 编译器与链接器告警。
+
+详细日志位于验证构建目录的 `logs/`。
 
 ## Qt Creator
 
-Qt Creator 中打开根目录，按 CMake 项目打开 `CMakeLists.txt`。
+以 CMake 项目打开根目录 `CMakeLists.txt`，为 Qt5 和 Qt6 使用独立构建目录。涉及 `Q_OBJECT`、导出宏或源文件列表变化时重新运行 CMake 配置。

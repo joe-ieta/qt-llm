@@ -58,3 +58,22 @@ managed `llama-cpp` 启动前会先生成 launch plan，再注入 `--gpu-layers`
 - `localModelCount`
 
 配置 UI 应展示可用性字段，让用户知道当前 provider 为什么能用或不能用。
+
+## 请求级配置
+
+`ChatRequest` 支持简单 `systemPrompt` / `userPrompt`，也支持宿主提供结构化 `messages`。两者同时使用时应由调用方明确组合意图，推荐多轮场景只使用结构化消息。
+
+- `output`：Text、Json 或 JsonSchema 输出约束。
+- `clientId`、`sessionId`、`traceId`：宿主关联标识；空值时库按入口规则生成或传递。
+- `metadata`：宿主扩展 JSON，基础库不解释业务字段。
+
+## 上下文预算
+
+`MemoryPolicy` 的 `maxHistoryMessages`、`contextWindowTokens`、`reservedOutputTokens` 和 `minimumRecentTurns` 控制 ConversationClient 请求窗口。token 预算默认关闭，保持旧调用行为。
+
+## 配置责任
+
+- API key 和用户设置由宿主安全持久化。
+- 普通宿主设置 `RuntimeProfile`，不同时维护一份独立 `LlmConfig`。
+- 只有高级 `QtLLMClient` 集成直接负责 `LlmConfig` 的完整性。
+- 不应根据错误文案反推配置状态，应读取结构化错误和可用性字段。

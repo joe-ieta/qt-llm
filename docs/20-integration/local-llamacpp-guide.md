@@ -1,33 +1,21 @@
-# Local `llama.cpp` Managed Integration
+# 本地 llama.cpp 托管集成
 
-- Product: `qt-llm`
-- Status: Active
-- Updated: 2026-05-17
+## 定位
 
-## Summary
+qt-llm 可以通过 `llama-cpp` Provider 托管 `llama-server`。普通宿主使用 `RuntimeFacade` 和模型目录接口，不应复制 runtime 搜索、模型合并、启动参数和健康检查逻辑。
 
-`qt-llm` supports a managed `llama.cpp` integration through provider
-`llama-cpp`.
+## 组件选择
 
-The active model is:
+- 通过 `RuntimeFacade` 使用本地模型：链接 `QtLlm::Conversation`。
+- 直接使用运行实例和协调服务：链接 `QtLlm::LocalRuntime`。
+- 兼容完整接入：链接 `QtLlm::QtLlm`。
 
-- the runtime payload is expected to be app-local
-- the managed model catalog can combine bundled and supplemental model folders
-- host apps should consume the returned managed model list rather than infer
-  search paths themselves
+## Runtime 布局
 
-## Runtime Root
-
-The preferred managed runtime root is:
+首选应用本地目录：
 
 ```text
 <applicationDir>/llama-cpp-runtime/
-```
-
-Expected shape:
-
-```text
-llama-cpp-runtime/
   bin/
     llama-server.exe
   models/
@@ -35,135 +23,53 @@ llama-cpp-runtime/
   logs/
 ```
 
-If `llamaCppRuntimeRoot` is explicitly set, that explicit value still wins.
+显式设置 `llamaCppRuntimeRoot` 或 `llamaCppExecutablePath` 时，显式值优先。runtime 的下载、安装、升级和签名校验属于部署能力，当前库不自动完成。
 
-Without an explicit override, the runtime root defaults to the current
-application directory's `llama-cpp-runtime`.
+## 模型目录
 
-This is a deliberate product boundary:
+托管模型目录会合并：
 
-- runtime provisioning belongs to packaging/deployment
-- runtime-root ranking should not be reimplemented by each host app
+1. `<runtimeRoot>/models` 中的内置模型。
+2. 应用目录、环境根目录和平台共享根下发现的 `qtllm/models`。
 
-## Managed Model Catalog
+宿主调用 `RuntimeFacade::listLocalModels()` 或 `ModelCatalogService` 获得结果。不要自行扫描磁盘并复制排序、去重和路径优先级。
 
-The managed model catalog is broader than the bundled runtime root.
+模型解析顺序：
 
-`qt-llm` aggregates models from:
+1. 显式 `llamaCppModelPath`。
+2. `model` 与托管目录中的 ID 匹配。
+3. 仅发现一个 `.gguf` 时自动选择。
 
-1. bundled models under `<runtimeRoot>/models`
-2. supplemental shared folders discovered as `<searchBase>/qtllm/models`
+## 运行规划
 
-Current supplemental search bases include:
+推荐宿主暴露高层策略：
 
-- the current application directory
-- environment roots:
-  - `ZNZ_HOME`
-  - `ZNZ_BLACKBOARD`
-  - `YIDA_HOME`
-  - `YIDA_BLACKBOARD`
-  - `IETA_HOME`
-  - `IETA_BLACKBOARD`
-- Windows shared roots such as `<drive>/LLMs`
-- Linux shared roots such as `/home/.../LLMs`
+- `llamaCppGpuMode`：`auto`、`cpu-only`、`prefer-gpu`、`explicit`。
+- `llamaCppPerformanceProfile`：`conservative`、`balanced`、`aggressive`。
+- `llamaCppContextMode`：`auto`、`explicit`。
 
-This means host apps should not hardcode:
+qt-llm 根据策略、模型大小、GPU backend 和 CPU 线程派生 `--gpu-layers`、`--threads` 和 `--ctx-size`。`llamaCppExtraArgs` 及显式数值是专家覆盖，存在同名参数时不会重复注入。
 
-- runtime-root search order for models
-- direct directory scanning rules
-- list merge rules across bundled and shared model folders
+## 实例、租约与所有权
 
-Instead, host apps should call the model-list API and display the resulting
-managed catalog.
+`ManagedLlamaCppRuntimeService` 对相同运行条件共享实例并返回租约：
 
-## Model Selection
+- `LibraryOwned`：由库启动，最后一个租约释放后停止。
+- `ExternalService`：端口已有健康服务，释放租约不会关闭外部进程。
+- 同端口的不同实例请求排队，区分排队、启动和总时限。
+- 获取阶段可通过稳定 `requestId` 取消。
 
-Host apps should use the managed catalog returned by `RuntimeFacade` /
-`ModelCatalogService`.
+`RuntimeFacade` 默认使用共享服务；多个 facade 需要共享时，宿主可注入同一服务实例。
 
-Typical flow:
+## 可用性和故障
 
-```cpp
-qtllm::host::RuntimeFacade runtime;
-runtime.setProfile(profile);
-QString errorMessage;
-const QList<qtllm::host::LocalModelInfo> models = runtime.listLocalModels(&errorMessage);
-```
+宿主应展示 `providerAvailable`、`providerAvailabilityStatus`、`providerAvailabilityMessage`、`resolvedRuntimeRoot`、`resolvedModelPath`、`localModelCount` 以及运行规划诊断字段。
 
-When a model is selected, the host can persist:
+端口被占用时，只有 HTTP 健康探测通过才复用现有服务。启动实例会检查 `/health`，必要时回退 `/v1/models`。不要只根据端口打开就判定服务可用。
 
-```cpp
-profile.model = model.id;
-profile.llamaCppModelPath = model.filePath;
-```
+## 非目标
 
-Model resolution order inside `qt-llm` is:
-
-1. explicit `llamaCppModelPath`
-2. explicit `model` matched against the aggregated managed catalog
-3. the single discovered `.gguf` file if there is exactly one
-
-## Runtime Planning
-
-Managed `llama.cpp` startup is policy-first.
-
-Recommended host-facing fields are:
-
-- `llamaCppGpuMode`: `auto`, `cpu-only`, `prefer-gpu`, `explicit`
-- `llamaCppPerformanceProfile`: `conservative`, `balanced`, `aggressive`
-- `llamaCppContextMode`: `auto`, `explicit`
-
-`qt-llm` derives launch parameters such as:
-
-- `--gpu-layers`
-- `--threads`
-- `--ctx-size`
-
-Expert overrides still exist through:
-
-- `llamaCppExtraArgs`
-- explicit `llamaCppGpuLayers`
-- explicit `llamaCppThreadCount`
-- explicit `llamaCppContextSize`
-
-Resolved diagnostics remain available through fields such as:
-
-- `resolvedLlamaCppGpuMode`
-- `resolvedLlamaCppGpuLayers`
-- `resolvedLlamaCppThreadCount`
-- `resolvedLlamaCppContextSize`
-- `runtimePlanSummary`
-- `runtimePlanWarnings`
-
-## Lifecycle
-
-`ManagedLlamaCppRuntime::ensureRunning()`:
-
-1. resolves runtime layout
-2. resolves the active model
-3. derives the launch plan
-4. starts `llama-server` when needed
-5. reuses an existing server on the configured port when appropriate
-
-`ManagedLlamaCppRuntime::stop()` terminates the process owned by the runtime
-instance.
-
-Tool apps may also connect `QCoreApplication::aboutToQuit` to
-`ManagedLlamaCppRuntime::stop()` for explicit shutdown behavior.
-
-## Host-App Boundary
-
-For host apps, the active guidance is:
-
-- expose high-level local-runtime intent
-- consume the managed model catalog returned by `qt-llm`
-- avoid making end users reason about runtime-root details or low-level launch
-  knobs
-
-For `qt-llm`, the active responsibility is:
-
-- runtime-root interpretation
-- bundled/supplemental model search semantics
-- managed model-list aggregation
-- launch planning
-- managed `llama-server` lifecycle
+- 不提供模型管理 UI。
+- 不自动下载或升级 runtime。
+- 不管理 Ollama 和远端 Provider 进程。
+- 不决定宿主产品的部署目录和业务模型选择策略。
