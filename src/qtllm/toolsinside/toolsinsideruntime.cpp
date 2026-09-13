@@ -1,6 +1,7 @@
 #include "toolsinsideruntime.h"
 
 #include "toolsinsidetracerecorder.h"
+#include "../events/llmeventdispatcher.h"
 
 #include <QDir>
 
@@ -79,12 +80,16 @@ std::shared_ptr<ToolsInsideTraceRecorder> ToolsInsideRuntime::recorder() const
 
 void ToolsInsideRuntime::rebuildPaths()
 {
+    if (m_recorder) {
+        events::LlmEventDispatcher::instance().removeSink(m_recorder);
+    }
     const QString root = QDir(m_workspaceRoot).filePath(QStringLiteral(".qtllm/tools_inside"));
     m_repository = std::make_shared<ToolsInsideRepository>(QDir(root).filePath(QStringLiteral("index.db")));
     m_artifactStore = std::make_shared<ToolsInsideArtifactStore>(QDir(root).filePath(QStringLiteral("artifacts")));
     m_queryService = std::make_shared<ToolsInsideQueryService>(m_repository);
     m_adminService = std::make_shared<ToolsInsideAdminService>(root, m_repository, m_artifactStore);
     m_recorder = std::make_shared<ToolsInsideTraceRecorder>(m_repository, m_artifactStore, m_storagePolicy, m_redactionPolicy);
+    events::LlmEventDispatcher::instance().addSink(m_recorder);
     m_repository->ensureInitialized(nullptr);
 }
 

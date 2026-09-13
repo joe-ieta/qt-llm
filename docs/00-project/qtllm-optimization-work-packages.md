@@ -96,6 +96,8 @@
 
 ### QTL-03 基础事件与诊断解耦
 
+状态：已完成。事件接口、接收端和诊断启用规则见 [基础事件与诊断接入](../30-development/event-diagnostics.md)。
+
 目标：提供稳定基础事件，并允许核心在不启用 SQLite 和 ToolsInside 时运行。
 
 范围与交付：

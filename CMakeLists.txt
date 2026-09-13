@@ -90,7 +90,7 @@ if(QTLLM_ENABLE_INSTALL)
         INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     )
     foreach(_qtllm_public_header_dir
-            chat core host identity logging network profile providers runtime
+            chat core events host identity logging network profile providers runtime
             storage streaming tools toolsinside toolsstudio)
         install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src/qtllm/${_qtllm_public_header_dir}"
             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}

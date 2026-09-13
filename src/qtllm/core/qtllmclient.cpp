@@ -1,6 +1,7 @@
 #include "qtllmclient.h"
 
 #include "../identity/compactid.h"
+#include "../events/llmeventdispatcher.h"
 #include "../logging/qtllmlogger.h"
 #include "../network/httpexecutor.h"
 #include "../providers/illmprovider.h"
@@ -9,8 +10,6 @@
 #include "../streaming/streamchunkparser.h"
 #include "../tools/runtime/toolcallorchestrator.h"
 #include "../tools/runtime/toolruntime_types.h"
-#include "../toolsinside/toolsinsideruntime.h"
-#include "../toolsinside/toolsinsidetracerecorder.h"
 
 #include <QDateTime>
 #include <QJsonObject>
@@ -171,6 +170,8 @@ void QtLLMClient::cancelCurrentRequest()
                                           QStringLiteral("Current request cancellation requested"),
                                           logContext(m_toolLoopClientId, m_toolLoopSessionId, m_activeRequestId, m_toolLoopTraceId));
     emit cancellationRequested(m_activeRequestId);
+    events::LlmEventDispatcher::instance().recordCancellationRequested(
+        m_toolLoopClientId, m_toolLoopSessionId, m_toolLoopTraceId, m_activeRequestId);
     m_executor->cancel();
 }
 
@@ -214,7 +215,7 @@ void QtLLMClient::dispatchRequest(const LlmRequest &request)
                                                       {QStringLiteral("url"), url}});
 
     emit providerPayloadPrepared(url, payloadJson);
-    toolsinside::ToolsInsideRuntime::instance().recorder()->recordRequestDispatched(m_toolLoopClientId,
+    events::LlmEventDispatcher::instance().recordRequestDispatched(m_toolLoopClientId,
                                                                                      m_toolLoopSessionId,
                                                                                      m_toolLoopTraceId,
                                                                                      m_activeRequestId,
@@ -313,13 +314,19 @@ void QtLLMClient::wireExecutor()
                 if (delta.channel == QStringLiteral("reasoning")) {
                     m_accumulatedReasoning += delta.text;
                     emit reasoningTokenReceived(delta.text);
-                    toolsinside::ToolsInsideRuntime::instance().recorder()->recordFirstStreamToken(m_toolLoopTraceId, m_activeRequestId, QStringLiteral("reasoning"));
+                    events::LlmEventDispatcher::instance().recordStreamDelta(
+                        m_toolLoopTraceId, m_activeRequestId, QStringLiteral("reasoning"), delta.text.size());
+                    events::LlmEventDispatcher::instance().recordFirstStreamToken(
+                        m_toolLoopTraceId, m_activeRequestId, QStringLiteral("reasoning"));
                     continue;
                 }
 
                 m_accumulatedText += delta.text;
                 emit tokenReceived(delta.text);
-                toolsinside::ToolsInsideRuntime::instance().recorder()->recordFirstStreamToken(m_toolLoopTraceId, m_activeRequestId, QStringLiteral("content"));
+                events::LlmEventDispatcher::instance().recordStreamDelta(
+                    m_toolLoopTraceId, m_activeRequestId, QStringLiteral("content"), delta.text.size());
+                events::LlmEventDispatcher::instance().recordFirstStreamToken(
+                    m_toolLoopTraceId, m_activeRequestId, QStringLiteral("content"));
             }
         }
     });
@@ -361,7 +368,7 @@ void QtLLMClient::wireExecutor()
                                                    logContext(m_toolLoopClientId, m_toolLoopSessionId, m_activeRequestId, m_toolLoopTraceId),
                                                    QJsonObject{{QStringLiteral("error"), response.errorMessage},
                                                                {QStringLiteral("responseBytes"), data.size()}});
-            toolsinside::ToolsInsideRuntime::instance().recorder()->recordTraceError(m_toolLoopClientId,
+            events::LlmEventDispatcher::instance().recordTraceError(m_toolLoopClientId,
                                                                                       m_toolLoopSessionId,
                                                                                       m_toolLoopTraceId,
                                                                                       m_activeRequestId,
@@ -387,7 +394,8 @@ void QtLLMClient::wireExecutor()
                                                           {QStringLiteral("toolCallCount"), response.assistantMessage.toolCalls.size()},
                                                           {QStringLiteral("finishReason"), response.finishReason}});
 
-        toolsinside::ToolsInsideRuntime::instance().recorder()->recordResponseParsed(m_toolLoopTraceId, m_activeRequestId, response, finalText);
+        events::LlmEventDispatcher::instance().recordResponseParsed(
+            m_toolLoopTraceId, m_activeRequestId, response, finalText);
 
         if (m_toolOrchestrator && !m_toolLoopClientId.isEmpty() && !m_toolLoopSessionId.isEmpty()) {
             tools::runtime::ToolExecutionContext context;
@@ -412,7 +420,7 @@ void QtLLMClient::wireExecutor()
                 logging::QtLlmLogger::instance().warn(QStringLiteral("tool.loop"),
                                                       failureMessage,
                                                       logContext(m_toolLoopClientId, m_toolLoopSessionId, m_activeRequestId, m_toolLoopTraceId));
-                toolsinside::ToolsInsideRuntime::instance().recorder()->recordTraceError(m_toolLoopClientId,
+                events::LlmEventDispatcher::instance().recordTraceError(m_toolLoopClientId,
                                                                                           m_toolLoopSessionId,
                                                                                           m_toolLoopTraceId,
                                                                                           m_activeRequestId,
@@ -447,7 +455,7 @@ void QtLLMClient::wireExecutor()
             }
         }
 
-        toolsinside::ToolsInsideRuntime::instance().recorder()->recordTraceCompleted(m_toolLoopClientId,
+        events::LlmEventDispatcher::instance().recordTraceCompleted(m_toolLoopClientId,
                                                                                       m_toolLoopSessionId,
                                                                                       m_toolLoopTraceId,
                                                                                       m_activeRequestId,
@@ -457,7 +465,15 @@ void QtLLMClient::wireExecutor()
         finishRequest(response);
     });
 
-    connect(m_executor, &HttpExecutor::attemptReset, this, [this](int, int nextAttempt) {
+    connect(m_executor, &HttpExecutor::attemptStarted, this, [this](int attempt) {
+        events::LlmEventDispatcher::instance().recordRequestAttemptStarted(
+            m_toolLoopClientId, m_toolLoopSessionId, m_toolLoopTraceId, m_activeRequestId, attempt);
+    });
+
+    connect(m_executor, &HttpExecutor::attemptReset, this, [this](int previousAttempt, int nextAttempt) {
+        events::LlmEventDispatcher::instance().recordRequestAttemptReset(
+            m_toolLoopClientId, m_toolLoopSessionId, m_toolLoopTraceId, m_activeRequestId,
+            previousAttempt, nextAttempt);
         m_accumulatedText.clear();
         m_accumulatedReasoning.clear();
         m_streamParser->clear();
@@ -472,7 +488,7 @@ void QtLLMClient::wireExecutor()
                                                            {QStringLiteral("errorCode"), requestError.code},
                                                            {QStringLiteral("httpStatus"), requestError.httpStatus},
                                                            {QStringLiteral("attempt"), requestError.attempt}});
-        toolsinside::ToolsInsideRuntime::instance().recorder()->recordTraceError(m_toolLoopClientId,
+        events::LlmEventDispatcher::instance().recordTraceError(m_toolLoopClientId,
                                                                                   m_toolLoopSessionId,
                                                                                   m_toolLoopTraceId,
                                                                                   m_activeRequestId,

@@ -2,10 +2,10 @@
 
 #include "runtimeprofilemapper.h"
 #include "../core/qtllmclient.h"
+#include "../events/llmeventdispatcher.h"
 #include "../identity/compactid.h"
 #include "../runtime/managedllamacppruntime.h"
 #include "../toolsinside/toolsinsideruntime.h"
-#include "../toolsinside/toolsinsidetracerecorder.h"
 
 #include <QEventLoop>
 #include <QJsonDocument>
@@ -142,14 +142,14 @@ void RuntimeFacade::send(const ChatRequest &request)
     const LlmRequest llmRequest = RuntimeProfileMapper::toRequest(m_profile, m_activeRequest);
     const QString requestJson = QString::fromUtf8(QJsonDocument(requestToJson(llmRequest)).toJson(QJsonDocument::Compact));
 
-    toolsinside::ToolsInsideRuntime::instance().recorder()->startTrace(m_activeRequest.clientId,
+    events::LlmEventDispatcher::instance().startTrace(m_activeRequest.clientId,
                                                                         m_activeRequest.sessionId,
                                                                         m_activeRequest.traceId,
                                                                         m_activeRequest.userPrompt,
                                                                         m_profile.providerName,
                                                                         m_profile.model,
                                                                         m_profile.modelVendor);
-    toolsinside::ToolsInsideRuntime::instance().recorder()->recordRequestPrepared(m_activeRequest.clientId,
+    events::LlmEventDispatcher::instance().recordRequestPrepared(m_activeRequest.clientId,
                                                                                   m_activeRequest.sessionId,
                                                                                   m_activeRequest.traceId,
                                                                                   requestJson);

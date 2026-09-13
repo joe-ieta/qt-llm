@@ -4,8 +4,7 @@
 #include "../identity/compactid.h"
 #include "../providers/illmprovider.h"
 #include "../tools/runtime/toolcallorchestrator.h"
-#include "../toolsinside/toolsinsideruntime.h"
-#include "../toolsinside/toolsinsidetracerecorder.h"
+#include "../events/llmeventdispatcher.h"
 
 #include <QDateTime>
 #include <QJsonDocument>
@@ -280,7 +279,7 @@ void ConversationClient::sendUserMessageWithTools(const QString &content,
     const LlmRequest request = buildRequestForNextTurn(tools);
     const QString requestJson = requestToJsonText(request);
     emit requestPrepared(requestJson);
-    toolsinside::ToolsInsideRuntime::instance().recorder()->recordRequestPrepared(m_uid,
+    events::LlmEventDispatcher::instance().recordRequestPrepared(m_uid,
                                                                                   m_activeSessionId,
                                                                                   resolvedTraceId,
                                                                                   requestJson);

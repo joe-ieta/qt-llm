@@ -5,6 +5,7 @@
 #include "toolsinside_types.h"
 
 #include "../core/llmtypes.h"
+#include "../events/illmeventsink.h"
 #include "../tools/runtime/toolruntime_types.h"
 
 #include <QHash>
@@ -14,7 +15,7 @@
 
 namespace qtllm::toolsinside {
 
-class ToolsInsideTraceRecorder
+class ToolsInsideTraceRecorder : public qtllm::events::ILlmEventSink
 {
 public:
     ToolsInsideTraceRecorder(std::shared_ptr<ToolsInsideRepository> repository,
@@ -28,16 +29,16 @@ public:
                        const QString &turnInput,
                        const QString &provider,
                        const QString &model,
-                       const QString &vendor);
+                       const QString &vendor) override;
 
     void recordToolSelection(const QString &traceId,
                              const QStringList &toolIds,
-                             const QString &schemaText);
+                             const QString &schemaText) override;
 
     void recordRequestPrepared(const QString &clientId,
                                const QString &sessionId,
                                const QString &traceId,
-                               const QString &requestJson);
+                               const QString &requestJson) override;
 
     void recordRequestDispatched(const QString &clientId,
                                  const QString &sessionId,
@@ -48,64 +49,87 @@ public:
                                  const QString &url,
                                  const QString &payloadJson,
                                  int messageCount,
-                                 int toolCount);
+                                 int toolCount) override;
+
+    void recordRequestAttemptStarted(const QString &clientId,
+                                     const QString &sessionId,
+                                     const QString &traceId,
+                                     const QString &requestId,
+                                     int attempt) override;
+
+    void recordRequestAttemptReset(const QString &clientId,
+                                   const QString &sessionId,
+                                   const QString &traceId,
+                                   const QString &requestId,
+                                   int previousAttempt,
+                                   int nextAttempt) override;
+
+    void recordStreamDelta(const QString &traceId,
+                           const QString &requestId,
+                           const QString &channel,
+                           int textLength) override;
 
     void recordFirstStreamToken(const QString &traceId,
                                 const QString &requestId,
-                                const QString &channel);
+                                const QString &channel) override;
 
     void recordResponseParsed(const QString &traceId,
                               const QString &requestId,
                               const qtllm::LlmResponse &response,
-                              const QString &assistantText);
+                              const QString &assistantText) override;
 
     void recordToolCallsParsed(const qtllm::tools::runtime::ToolExecutionContext &context,
                                const QString &requestId,
                                const QString &adapterId,
                                int roundIndex,
-                               const QList<qtllm::tools::runtime::ToolCallRequest> &requests);
+                               const QList<qtllm::tools::runtime::ToolCallRequest> &requests) override;
 
     void recordToolBatchStarted(const qtllm::tools::runtime::ToolExecutionContext &context,
                                 const QString &requestId,
                                 int roundIndex,
-                                int requestCount);
+                                int requestCount) override;
 
     void recordToolCallStarted(const qtllm::tools::runtime::ToolExecutionContext &context,
                                const QString &requestId,
                                int roundIndex,
-                               const qtllm::tools::runtime::ToolCallRequest &request);
+                               const qtllm::tools::runtime::ToolCallRequest &request) override;
 
     void recordToolCallFinished(const qtllm::tools::runtime::ToolExecutionContext &context,
                                 const QString &requestId,
                                 int roundIndex,
                                 const qtllm::tools::runtime::ToolCallRequest &request,
-                                const qtllm::tools::runtime::ToolExecutionResult &result);
+                                const qtllm::tools::runtime::ToolExecutionResult &result) override;
 
     void recordFollowUpPrompt(const qtllm::tools::runtime::ToolExecutionContext &context,
                               const QString &requestId,
                               int roundIndex,
                               const QString &prompt,
-                              const QList<qtllm::tools::runtime::ToolExecutionResult> &results);
+                              const QList<qtllm::tools::runtime::ToolExecutionResult> &results) override;
 
     void recordFailureGuard(const qtllm::tools::runtime::ToolExecutionContext &context,
                             const QString &requestId,
                             int roundIndex,
                             int consecutiveFailures,
-                            const QString &reason);
+                            const QString &reason) override;
+
+    void recordCancellationRequested(const QString &clientId,
+                                     const QString &sessionId,
+                                     const QString &traceId,
+                                     const QString &requestId) override;
 
     void recordTraceCompleted(const QString &clientId,
                               const QString &sessionId,
                               const QString &traceId,
                               const QString &requestId,
                               const QString &finalText,
-                              const QString &finishReason);
+                              const QString &finishReason) override;
 
     void recordTraceError(const QString &clientId,
                           const QString &sessionId,
                           const QString &traceId,
                           const QString &requestId,
                           const QString &message,
-                          const QString &category);
+                          const QString &category) override;
 
 private:
     QString ensureSpanId(const QString &key) const;

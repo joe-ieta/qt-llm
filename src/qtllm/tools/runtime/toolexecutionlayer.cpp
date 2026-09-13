@@ -5,8 +5,7 @@
 #include "../mcp/defaultmcpclient.h"
 #include "../mcp/mcpserverregistry.h"
 #include "../../logging/qtllmlogger.h"
-#include "../../toolsinside/toolsinsideruntime.h"
-#include "../../toolsinside/toolsinsidetracerecorder.h"
+#include "../../events/llmeventdispatcher.h"
 
 #include <QElapsedTimer>
 #include <QJsonObject>
@@ -136,7 +135,7 @@ ToolExecutionResult ToolExecutionLayer::executeSingle(const ToolCallRequest &req
 
     ToolCallRequest resolvedRequest = request;
     resolvedRequest.toolId = resolvedToolId;
-    toolsinside::ToolsInsideRuntime::instance().recorder()->recordToolCallStarted(context,
+    events::LlmEventDispatcher::instance().recordToolCallStarted(context,
                                                                                   context.requestId,
                                                                                   roundIndex,
                                                                                   resolvedRequest);
@@ -156,7 +155,7 @@ ToolExecutionResult ToolExecutionLayer::executeSingle(const ToolCallRequest &req
         if (out.toolId.isEmpty()) {
             out.toolId = resolvedRequest.toolId;
         }
-        toolsinside::ToolsInsideRuntime::instance().recorder()->recordToolCallFinished(context,
+        events::LlmEventDispatcher::instance().recordToolCallFinished(context,
                                                                                        context.requestId,
                                                                                        roundIndex,
                                                                                        resolvedRequest,

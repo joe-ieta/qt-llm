@@ -21,6 +21,7 @@
 #include "../../src/qtllm/chat/conversationclientfactory.h"
 #include "../../src/qtllm/core/llmconfig.h"
 #include "../../src/qtllm/core/llmtypes.h"
+#include "../../src/qtllm/events/llmeventdispatcher.h"
 #include "../../src/qtllm/identity/compactid.h"
 #include "../../src/qtllm/logging/filelogsink.h"
 #include "../../src/qtllm/logging/logtypes.h"
@@ -43,6 +44,36 @@
 using namespace qtllm;
 
 namespace {
+
+class RecordingLlmEventSink final : public qtllm::events::ILlmEventSink
+{
+public:
+    QStringList events;
+    QString lastRequestId;
+
+    void recordRequestAttemptStarted(const QString &, const QString &, const QString &,
+                                     const QString &requestId, int attempt) override
+    {
+        lastRequestId = requestId;
+        events.append(QStringLiteral("attempt_started:%1").arg(attempt));
+    }
+
+    void recordRequestAttemptReset(const QString &, const QString &, const QString &,
+                                   const QString &requestId, int previousAttempt,
+                                   int nextAttempt) override
+    {
+        lastRequestId = requestId;
+        events.append(QStringLiteral("attempt_reset:%1:%2").arg(previousAttempt).arg(nextAttempt));
+    }
+
+    void recordTraceCompleted(const QString &, const QString &, const QString &,
+                              const QString &requestId, const QString &,
+                              const QString &) override
+    {
+        lastRequestId = requestId;
+        events.append(QStringLiteral("completed"));
+    }
+};
 
 class FakeMcpClient final : public qtllm::tools::mcp::IMcpClient
 {
@@ -1372,6 +1403,36 @@ void QtLlmCoreTests::httpExecutorCancelDuringRetryBackoffDoesNotRestart()
     const HttpRequestError error = qvariant_cast<HttpRequestError>(failedSpy.first().at(0));
     QCOMPARE(error.category, HttpErrorCategory::Canceled);
     QCOMPARE(error.code, QStringLiteral("request_canceled"));
+}
+
+void QtLlmCoreTests::llmEventDispatcherFansOutAndDetachesSinks()
+{
+    events::LlmEventDispatcher &dispatcher = events::LlmEventDispatcher::instance();
+    dispatcher.clearSinks();
+    const auto sink = std::make_shared<RecordingLlmEventSink>();
+    dispatcher.addSink(sink);
+    dispatcher.addSink(sink);
+    QCOMPARE(dispatcher.sinkCount(), 1);
+
+    dispatcher.recordRequestAttemptStarted(QStringLiteral("client"), QStringLiteral("session"),
+                                           QStringLiteral("trace"), QStringLiteral("request"), 1);
+    dispatcher.recordRequestAttemptReset(QStringLiteral("client"), QStringLiteral("session"),
+                                         QStringLiteral("trace"), QStringLiteral("request"), 1, 2);
+    dispatcher.recordTraceCompleted(QStringLiteral("client"), QStringLiteral("session"),
+                                    QStringLiteral("trace"), QStringLiteral("request"),
+                                    QStringLiteral("done"), QStringLiteral("stop"));
+
+    QCOMPARE(sink->lastRequestId, QStringLiteral("request"));
+    QCOMPARE(sink->events,
+             QStringList({QStringLiteral("attempt_started:1"),
+                          QStringLiteral("attempt_reset:1:2"),
+                          QStringLiteral("completed")}));
+
+    dispatcher.removeSink(sink);
+    QCOMPARE(dispatcher.sinkCount(), 0);
+    dispatcher.recordTraceError(QString(), QString(), QString(), QStringLiteral("ignored"),
+                                QStringLiteral("ignored"), QStringLiteral("test"));
+    QCOMPARE(sink->events.size(), 3);
 }
 
 int main(int argc, char *argv[])

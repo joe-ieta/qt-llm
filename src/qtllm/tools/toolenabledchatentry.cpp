@@ -1,9 +1,8 @@
 #include "toolenabledchatentry.h"
 
 #include "../identity/compactid.h"
+#include "../events/llmeventdispatcher.h"
 #include "../logging/qtllmlogger.h"
-#include "../toolsinside/toolsinsideruntime.h"
-#include "../toolsinside/toolsinsidetracerecorder.h"
 
 #include <QDateTime>
 #include <QJsonArray>
@@ -86,7 +85,7 @@ void ToolEnabledChatEntry::sendUserMessage(const QString &content)
     m_requestId.clear();
     m_traceId = identity::generateId(identity::IdKind::Trace);
 
-    toolsinside::ToolsInsideRuntime::instance().recorder()->startTrace(m_client->uid(),
+    events::LlmEventDispatcher::instance().startTrace(m_client->uid(),
                                                                        m_client->activeSessionId(),
                                                                        m_traceId,
                                                                        trimmed,
@@ -99,7 +98,7 @@ void ToolEnabledChatEntry::sendUserMessage(const QString &content)
     const QString toolSchemaText = QString::fromUtf8(QJsonDocument(tools).toJson(QJsonDocument::Indented));
     emit toolSelectionPrepared(selectedToolIds);
     emit toolSchemaPrepared(toolSchemaText);
-    toolsinside::ToolsInsideRuntime::instance().recorder()->recordToolSelection(m_traceId, selectedToolIds, toolSchemaText);
+    events::LlmEventDispatcher::instance().recordToolSelection(m_traceId, selectedToolIds, toolSchemaText);
 
     logging::QtLlmLogger::instance().info(QStringLiteral("tool.selection"),
                                           QStringLiteral("Prepared tools for user turn"),

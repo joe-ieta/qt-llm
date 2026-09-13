@@ -49,6 +49,7 @@ private slots:
     void defaultMcpClientCallsToolOverHttpLikeTransport();
     void httpExecutorRetriesWithFreshBuffer();
     void httpExecutorCancelDuringRetryBackoffDoesNotRestart();
+    void llmEventDispatcherFansOutAndDetachesSinks();
     void streamChunkParserHandlesFragmentedInput();
     void streamChunkParserTakePendingLine();
 };

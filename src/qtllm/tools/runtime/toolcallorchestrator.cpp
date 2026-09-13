@@ -2,8 +2,7 @@
 
 #include "../../identity/compactid.h"
 #include "../../logging/qtllmlogger.h"
-#include "../../toolsinside/toolsinsideruntime.h"
-#include "../../toolsinside/toolsinsidetracerecorder.h"
+#include "../../events/llmeventdispatcher.h"
 
 #include <optional>
 #include <QJsonObject>
@@ -182,7 +181,7 @@ ToolLoopOutcome ToolCallOrchestrator::processToolCalls(const std::shared_ptr<pro
         }
     }
 
-    toolsinside::ToolsInsideRuntime::instance().recorder()->recordToolCallsParsed(context,
+    events::LlmEventDispatcher::instance().recordToolCallsParsed(context,
                                                                                    context.requestId,
                                                                                    adapter->adapterId(),
                                                                                    currentRound,
@@ -199,7 +198,7 @@ ToolLoopOutcome ToolCallOrchestrator::processToolCalls(const std::shared_ptr<pro
 
     ToolExecutionContext executionContext = context;
     executionContext.extra.insert(QStringLiteral("toolLoopRoundIndex"), currentRound);
-    toolsinside::ToolsInsideRuntime::instance().recorder()->recordToolBatchStarted(executionContext,
+    events::LlmEventDispatcher::instance().recordToolBatchStarted(executionContext,
                                                                                     context.requestId,
                                                                                     currentRound,
                                                                                     executionRequests.size());
@@ -229,7 +228,7 @@ ToolLoopOutcome ToolCallOrchestrator::processToolCalls(const std::shared_ptr<pro
                                               QJsonObject{{QStringLiteral("rounds"), state.rounds},
                                                           {QStringLiteral("consecutiveFailures"), state.consecutiveFailures},
                                                           {QStringLiteral("maxConsecutiveFailures"), m_maxConsecutiveFailures}});
-        toolsinside::ToolsInsideRuntime::instance().recorder()->recordFailureGuard(executionContext,
+        events::LlmEventDispatcher::instance().recordFailureGuard(executionContext,
                                                                                     context.requestId,
                                                                                     currentRound,
                                                                                     state.consecutiveFailures,
@@ -239,7 +238,7 @@ ToolLoopOutcome ToolCallOrchestrator::processToolCalls(const std::shared_ptr<pro
 
     outcome.hasFollowUpPrompt = true;
     outcome.followUpPrompt = adapter->buildFollowUpPrompt(assistantText, results);
-    toolsinside::ToolsInsideRuntime::instance().recorder()->recordFollowUpPrompt(executionContext,
+    events::LlmEventDispatcher::instance().recordFollowUpPrompt(executionContext,
                                                                                  context.requestId,
                                                                                  currentRound,
                                                                                  outcome.followUpPrompt,

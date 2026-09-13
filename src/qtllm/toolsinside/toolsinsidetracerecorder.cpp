@@ -307,6 +307,82 @@ void ToolsInsideTraceRecorder::recordFirstStreamToken(const QString &traceId,
     m_repository->upsertEvent(event, nullptr);
 }
 
+void ToolsInsideTraceRecorder::recordRequestAttemptStarted(const QString &clientId,
+                                                           const QString &sessionId,
+                                                           const QString &traceId,
+                                                           const QString &requestId,
+                                                           int attempt)
+{
+    Q_UNUSED(clientId)
+    Q_UNUSED(sessionId)
+    if (!m_repository) {
+        return;
+    }
+
+    ToolsInsideEventRecord event;
+    event.eventId = identity::generateId(identity::IdKind::Event);
+    event.traceId = traceId;
+    event.spanId = ensureSpanId(requestSpanKey(traceId, requestId));
+    event.requestId = requestId;
+    event.category = QStringLiteral("llm.request");
+    event.name = QStringLiteral("request_attempt_started");
+    event.payload = QJsonObject{{QStringLiteral("attempt"), attempt}};
+    m_repository->upsertEvent(event, nullptr);
+}
+
+void ToolsInsideTraceRecorder::recordRequestAttemptReset(const QString &clientId,
+                                                         const QString &sessionId,
+                                                         const QString &traceId,
+                                                         const QString &requestId,
+                                                         int previousAttempt,
+                                                         int nextAttempt)
+{
+    Q_UNUSED(clientId)
+    Q_UNUSED(sessionId)
+    if (!m_repository) {
+        return;
+    }
+
+    const QString key = traceId + QStringLiteral("::") + requestId;
+    {
+        QMutexLocker locker(&m_mutex);
+        m_firstContentTokenSeen.remove(key);
+        m_firstReasoningTokenSeen.remove(key);
+    }
+
+    ToolsInsideEventRecord event;
+    event.eventId = identity::generateId(identity::IdKind::Event);
+    event.traceId = traceId;
+    event.spanId = ensureSpanId(requestSpanKey(traceId, requestId));
+    event.requestId = requestId;
+    event.category = QStringLiteral("llm.request");
+    event.name = QStringLiteral("request_attempt_reset");
+    event.payload = QJsonObject{{QStringLiteral("previousAttempt"), previousAttempt},
+                                {QStringLiteral("nextAttempt"), nextAttempt}};
+    m_repository->upsertEvent(event, nullptr);
+}
+
+void ToolsInsideTraceRecorder::recordStreamDelta(const QString &traceId,
+                                                 const QString &requestId,
+                                                 const QString &channel,
+                                                 int textLength)
+{
+    if (!m_repository) {
+        return;
+    }
+
+    ToolsInsideEventRecord event;
+    event.eventId = identity::generateId(identity::IdKind::Event);
+    event.traceId = traceId;
+    event.spanId = ensureSpanId(requestSpanKey(traceId, requestId));
+    event.requestId = requestId;
+    event.category = QStringLiteral("llm.stream");
+    event.name = QStringLiteral("stream_delta");
+    event.payload = QJsonObject{{QStringLiteral("channel"), channel},
+                                {QStringLiteral("textLength"), textLength}};
+    m_repository->upsertEvent(event, nullptr);
+}
+
 void ToolsInsideTraceRecorder::recordResponseParsed(const QString &traceId,
                                                     const QString &requestId,
                                                     const qtllm::LlmResponse &response,
@@ -661,6 +737,27 @@ void ToolsInsideTraceRecorder::recordTraceCompleted(const QString &clientId,
     m_repository->upsertSpan(span, nullptr);
 
     m_repository->finishTrace(traceId, QStringLiteral("completed"), artifactId, QDateTime::currentDateTimeUtc(), nullptr);
+}
+
+void ToolsInsideTraceRecorder::recordCancellationRequested(const QString &clientId,
+                                                           const QString &sessionId,
+                                                           const QString &traceId,
+                                                           const QString &requestId)
+{
+    Q_UNUSED(clientId)
+    Q_UNUSED(sessionId)
+    if (!m_repository) {
+        return;
+    }
+
+    ToolsInsideEventRecord event;
+    event.eventId = identity::generateId(identity::IdKind::Event);
+    event.traceId = traceId;
+    event.spanId = ensureSpanId(requestSpanKey(traceId, requestId));
+    event.requestId = requestId;
+    event.category = QStringLiteral("llm.request");
+    event.name = QStringLiteral("request_cancellation_requested");
+    m_repository->upsertEvent(event, nullptr);
 }
 
 void ToolsInsideTraceRecorder::recordTraceError(const QString &clientId,
