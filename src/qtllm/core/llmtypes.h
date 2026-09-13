@@ -2,6 +2,7 @@
 
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QMetaType>
 #include <QString>
 #include <QVector>
 
@@ -36,6 +37,28 @@ struct LlmRequest
     QJsonArray tools;
 };
 
+enum class LlmErrorCategory
+{
+    None,
+    Configuration,
+    Runtime,
+    Transport,
+    Protocol,
+    Tool,
+    Canceled
+};
+
+struct LlmError
+{
+    LlmErrorCategory category = LlmErrorCategory::None;
+    QString code;
+    QString message;
+    QString diagnostic;
+    bool retryable = false;
+    int httpStatus = 0;
+    int attempt = 0;
+};
+
 struct LlmResponse
 {
     QString text;
@@ -45,6 +68,11 @@ struct LlmResponse
     // Structured assistant response fields.
     LlmMessage assistantMessage;
     QString finishReason;
+
+    // Logical request lifecycle fields. Existing fields remain source-compatible.
+    QString requestId;
+    bool canceled = false;
+    LlmError error;
 };
 
 struct LlmStreamDelta
@@ -54,3 +82,6 @@ struct LlmStreamDelta
 };
 
 } // namespace qtllm
+
+Q_DECLARE_METATYPE(qtllm::LlmError)
+Q_DECLARE_METATYPE(qtllm::LlmResponse)

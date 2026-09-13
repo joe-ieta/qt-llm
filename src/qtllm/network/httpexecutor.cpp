@@ -11,22 +11,42 @@ HttpExecutor::HttpExecutor(QObject *parent)
     : QObject(parent)
     , m_networkAccessManager(new QNetworkAccessManager(this))
     , m_timeoutTimer(new QTimer(this))
+    , m_retryTimer(new QTimer(this))
 {
     m_timeoutTimer->setSingleShot(true);
+    m_retryTimer->setSingleShot(true);
+
     connect(m_timeoutTimer, &QTimer::timeout, this, [this]() {
-        if (!m_activeReply) {
+        if (!m_requestActive || !m_activeReply) {
             return;
         }
 
         m_timedOut = true;
         m_activeReply->abort();
     });
+    connect(m_retryTimer, &QTimer::timeout, this, &HttpExecutor::startAttempt);
 }
 
 void HttpExecutor::post(const QNetworkRequest &request, const QByteArray &payload,
                         const HttpRequestOptions &options)
 {
-    cancel();
+    if (m_requestActive) {
+        m_timeoutTimer->stop();
+        m_retryTimer->stop();
+        if (m_activeReply) {
+            disconnect(m_activeReply, nullptr, this, nullptr);
+            m_activeReply->abort();
+            m_activeReply->deleteLater();
+            m_activeReply.clear();
+        }
+
+        HttpRequestError replaced;
+        replaced.category = HttpErrorCategory::Canceled;
+        replaced.code = QStringLiteral("request_replaced");
+        replaced.message = QStringLiteral("Request replaced by a newer request");
+        replaced.attempt = m_attempt;
+        finishWithError(replaced);
+    }
 
     m_request = request;
     m_payload = payload;
@@ -46,24 +66,41 @@ void HttpExecutor::post(const QNetworkRequest &request, const QByteArray &payloa
     m_attempt = 0;
     m_timedOut = false;
     m_cancelRequested = false;
+    m_requestActive = true;
+    m_terminalEmitted = false;
 
     startAttempt();
 }
 
 void HttpExecutor::cancel()
 {
-    m_timeoutTimer->stop();
-
-    if (!m_activeReply) {
+    if (!m_requestActive || m_terminalEmitted) {
         return;
     }
 
     m_cancelRequested = true;
-    m_activeReply->abort();
+    m_timeoutTimer->stop();
+    m_retryTimer->stop();
+
+    if (m_activeReply) {
+        m_activeReply->abort();
+        return;
+    }
+
+    HttpRequestError canceled;
+    canceled.category = HttpErrorCategory::Canceled;
+    canceled.code = QStringLiteral("request_canceled");
+    canceled.message = QStringLiteral("Request canceled");
+    canceled.attempt = m_attempt;
+    finishWithError(canceled);
 }
 
 void HttpExecutor::startAttempt()
 {
+    if (!m_requestActive || m_terminalEmitted || m_cancelRequested) {
+        return;
+    }
+
     if (m_activeReply) {
         m_activeReply->deleteLater();
         m_activeReply.clear();
@@ -72,16 +109,18 @@ void HttpExecutor::startAttempt()
     m_buffer.clear();
     m_timedOut = false;
     ++m_attempt;
+    emit attemptStarted(m_attempt);
 
     m_activeReply = m_networkAccessManager->post(m_request, m_payload);
+    QNetworkReply *reply = m_activeReply.data();
     m_timeoutTimer->start(m_options.timeoutMs);
 
-    connect(m_activeReply, &QNetworkReply::readyRead, this, [this]() {
-        if (!m_activeReply) {
+    connect(reply, &QNetworkReply::readyRead, this, [this, reply]() {
+        if (!m_requestActive || m_activeReply != reply) {
             return;
         }
 
-        const QByteArray chunk = m_activeReply->readAll();
+        const QByteArray chunk = reply->readAll();
         if (chunk.isEmpty()) {
             return;
         }
@@ -90,56 +129,109 @@ void HttpExecutor::startAttempt()
         emit dataReceived(chunk);
     });
 
-    connect(m_activeReply, &QNetworkReply::finished, this, [this]() {
-        if (!m_activeReply) {
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (m_activeReply != reply) {
+            reply->deleteLater();
             return;
         }
 
         m_timeoutTimer->stop();
+        const QByteArray trailingData = reply->readAll();
+        if (!trailingData.isEmpty()) {
+            m_buffer.append(trailingData);
+            emit dataReceived(trailingData);
+        }
 
-        const auto error = m_activeReply->error();
-        const QString errorString = m_activeReply->errorString();
-
-        m_activeReply->deleteLater();
+        const HttpRequestError requestError = classifyError(reply);
+        const bool failed = reply->error() != QNetworkReply::NoError || m_cancelRequested || m_timedOut;
         m_activeReply.clear();
+        reply->deleteLater();
 
-        if (m_cancelRequested) {
-            m_cancelRequested = false;
-            finishWithError(QStringLiteral("Request canceled"));
-            return;
-        }
-
-        if (error != QNetworkReply::NoError) {
-            if (canRetry()) {
-                QTimer::singleShot(m_options.retryDelayMs, this, [this]() {
-                    startAttempt();
-                });
+        if (failed) {
+            if (!m_cancelRequested && canRetry(requestError)) {
+                emit attemptReset(m_attempt, m_attempt + 1);
+                m_buffer.clear();
+                m_retryTimer->start(m_options.retryDelayMs);
                 return;
             }
 
-            if (m_timedOut) {
-                finishWithError(QStringLiteral("Request timeout"));
-                return;
-            }
-
-            finishWithError(errorString);
+            finishWithError(requestError);
             return;
         }
 
-        emit requestFinished(m_buffer);
-        m_buffer.clear();
+        finishSuccessfully();
     });
 }
 
-void HttpExecutor::finishWithError(const QString &message)
+void HttpExecutor::finishWithError(const HttpRequestError &error)
 {
+    if (!m_requestActive || m_terminalEmitted) {
+        return;
+    }
+
+    m_terminalEmitted = true;
+    m_requestActive = false;
+    m_timeoutTimer->stop();
+    m_retryTimer->stop();
     m_buffer.clear();
-    emit errorOccurred(message);
+    emit requestFailed(error);
+    emit errorOccurred(error.message);
 }
 
-bool HttpExecutor::canRetry() const
+void HttpExecutor::finishSuccessfully()
 {
-    return m_attempt <= m_options.maxRetries;
+    if (!m_requestActive || m_terminalEmitted) {
+        return;
+    }
+
+    m_terminalEmitted = true;
+    m_requestActive = false;
+    const QByteArray responseData = m_buffer;
+    m_buffer.clear();
+    emit requestFinished(responseData);
+}
+
+HttpRequestError HttpExecutor::classifyError(QNetworkReply *reply) const
+{
+    HttpRequestError error;
+    error.attempt = m_attempt;
+    error.diagnostic = reply ? reply->errorString() : QString();
+    error.httpStatus = reply ? reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() : 0;
+
+    if (m_cancelRequested) {
+        error.category = HttpErrorCategory::Canceled;
+        error.code = QStringLiteral("request_canceled");
+        error.message = QStringLiteral("Request canceled");
+        return error;
+    }
+
+    if (m_timedOut) {
+        error.category = HttpErrorCategory::Timeout;
+        error.code = QStringLiteral("request_timeout");
+        error.message = QStringLiteral("Request timeout");
+        error.retryable = true;
+        return error;
+    }
+
+    if (error.httpStatus >= 400) {
+        error.category = HttpErrorCategory::Http;
+        error.code = QStringLiteral("http_error");
+        error.message = error.diagnostic;
+        error.retryable = error.httpStatus == 408 || error.httpStatus == 425
+            || error.httpStatus == 429 || error.httpStatus >= 500;
+        return error;
+    }
+
+    error.category = HttpErrorCategory::Network;
+    error.code = QStringLiteral("network_error");
+    error.message = error.diagnostic.isEmpty() ? QStringLiteral("Network request failed") : error.diagnostic;
+    error.retryable = true;
+    return error;
+}
+
+bool HttpExecutor::canRetry(const HttpRequestError &error) const
+{
+    return error.retryable && m_attempt <= m_options.maxRetries;
 }
 
 } // namespace qtllm

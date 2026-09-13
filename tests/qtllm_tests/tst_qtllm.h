@@ -47,6 +47,8 @@ private slots:
     void fileLogSinkRotatesPerClient();
     void defaultMcpClientReadsToolsOverStdio();
     void defaultMcpClientCallsToolOverHttpLikeTransport();
+    void httpExecutorRetriesWithFreshBuffer();
+    void httpExecutorCancelDuringRetryBackoffDoesNotRestart();
     void streamChunkParserHandlesFragmentedInput();
     void streamChunkParserTakePendingLine();
 };

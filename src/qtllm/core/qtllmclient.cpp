@@ -114,21 +114,47 @@ void QtLLMClient::sendPrompt(const QString &prompt)
 
 void QtLLMClient::sendRequest(const LlmRequest &request)
 {
+    if (m_requestActive) {
+        emit requestRejected(QStringLiteral("request_in_progress"),
+                             QStringLiteral("A request is already active"));
+        return;
+    }
+
+    beginRequest();
+
     if (!m_provider) {
         if (!m_config.providerName.isEmpty()) {
             if (!setProviderByName(m_config.providerName)) {
+                LlmResponse response;
+                response.errorMessage = QStringLiteral("Unsupported provider: ") + m_config.providerName;
+                response.error.category = LlmErrorCategory::Configuration;
+                response.error.code = QStringLiteral("unsupported_provider");
+                response.error.message = response.errorMessage;
+                finishRequest(response, false);
                 return;
             }
         } else {
             const QString message = QStringLiteral("No provider configured");
             logging::QtLlmLogger::instance().error(QStringLiteral("llm.provider"), message,
                                                    logContext(m_toolLoopClientId, m_toolLoopSessionId, m_activeRequestId, m_toolLoopTraceId));
-            emit errorOccurred(message);
+            LlmResponse response;
+            response.errorMessage = message;
+            response.error.category = LlmErrorCategory::Configuration;
+            response.error.code = QStringLiteral("provider_not_configured");
+            response.error.message = message;
+            finishRequest(response);
             return;
         }
     }
 
-    if (!ensureManagedRuntime()) {
+    QString runtimeError;
+    if (!ensureManagedRuntime(&runtimeError)) {
+        LlmResponse response;
+        response.errorMessage = runtimeError;
+        response.error.category = LlmErrorCategory::Runtime;
+        response.error.code = QStringLiteral("managed_runtime_unavailable");
+        response.error.message = runtimeError;
+        finishRequest(response);
         return;
     }
 
@@ -137,10 +163,26 @@ void QtLLMClient::sendRequest(const LlmRequest &request)
 
 void QtLLMClient::cancelCurrentRequest()
 {
+    if (!m_requestActive || m_terminalEmitted) {
+        return;
+    }
+
     logging::QtLlmLogger::instance().info(QStringLiteral("llm.request"),
                                           QStringLiteral("Current request cancellation requested"),
                                           logContext(m_toolLoopClientId, m_toolLoopSessionId, m_activeRequestId, m_toolLoopTraceId));
+    emit cancellationRequested(m_activeRequestId);
     m_executor->cancel();
+}
+
+void QtLLMClient::beginRequest()
+{
+    m_requestActive = true;
+    m_terminalEmitted = false;
+    m_activeRequestId = identity::generateId(identity::IdKind::Request);
+    if (m_toolLoopTraceId.trimmed().isEmpty()) {
+        m_toolLoopTraceId = identity::generateId(identity::IdKind::Trace);
+    }
+    emit requestStarted(m_activeRequestId);
 }
 
 void QtLLMClient::dispatchRequest(const LlmRequest &request)
@@ -154,10 +196,6 @@ void QtLLMClient::dispatchRequest(const LlmRequest &request)
         resolved.model = m_config.model;
     }
     m_activeRequest = resolved;
-    m_activeRequestId = identity::generateId(identity::IdKind::Request);
-    if (m_toolLoopTraceId.trimmed().isEmpty()) {
-        m_toolLoopTraceId = identity::generateId(identity::IdKind::Trace);
-    }
 
     const QNetworkRequest networkRequest = m_provider->buildRequest(resolved);
     const QByteArray payload = m_provider->buildPayload(resolved);
@@ -195,7 +233,43 @@ void QtLLMClient::dispatchRequest(const LlmRequest &request)
     m_executor->post(networkRequest, payload, options);
 }
 
-bool QtLLMClient::ensureManagedRuntime()
+void QtLLMClient::finishRequest(LlmResponse response, bool emitCompatibilitySignal)
+{
+    if (!m_requestActive || m_terminalEmitted) {
+        return;
+    }
+
+    m_terminalEmitted = true;
+    m_requestActive = false;
+    response.requestId = m_activeRequestId;
+    if (!response.success) {
+        if (response.error.message.isEmpty()) {
+            response.error.message = response.errorMessage;
+        }
+        if (response.errorMessage.isEmpty()) {
+            response.errorMessage = response.error.message;
+        }
+        response.canceled = response.error.category == LlmErrorCategory::Canceled;
+    }
+
+    m_streamParser->clear();
+    emit requestFinished(response);
+
+    if (!emitCompatibilitySignal) {
+        return;
+    }
+
+    if (response.success) {
+        emit responseReceived(response);
+        emit completed(response.assistantMessage.content.isEmpty() ? response.text
+                                                                    : response.assistantMessage.content);
+        return;
+    }
+
+    emit errorOccurred(response.errorMessage);
+}
+
+bool QtLLMClient::ensureManagedRuntime(QString *errorMessage)
 {
     if (!runtime::ManagedLlamaCppRuntime::isManagedProvider(m_config.providerName)) {
         return true;
@@ -205,14 +279,16 @@ bool QtLLMClient::ensureManagedRuntime()
         m_llamaCppRuntime = std::make_unique<runtime::ManagedLlamaCppRuntime>(this);
     }
 
-    QString errorMessage;
+    QString runtimeError;
     LlmConfig runtimeConfig = m_config;
-    if (!m_llamaCppRuntime->ensureRunning(&runtimeConfig, &errorMessage)) {
+    if (!m_llamaCppRuntime->ensureRunning(&runtimeConfig, &runtimeError)) {
         logging::QtLlmLogger::instance().error(QStringLiteral("llm.runtime"),
                                                QStringLiteral("Managed llama.cpp runtime failed"),
                                                logContext(m_toolLoopClientId, m_toolLoopSessionId, m_activeRequestId, m_toolLoopTraceId),
-                                               QJsonObject{{QStringLiteral("error"), errorMessage}});
-        emit errorOccurred(errorMessage);
+                                               QJsonObject{{QStringLiteral("error"), runtimeError}});
+        if (errorMessage) {
+            *errorMessage = runtimeError;
+        }
         return false;
     }
 
@@ -226,7 +302,7 @@ bool QtLLMClient::ensureManagedRuntime()
 void QtLLMClient::wireExecutor()
 {
     connect(m_executor, &HttpExecutor::dataReceived, this, [this](const QByteArray &chunk) {
-        if (!m_provider || !m_activeRequest.stream) {
+        if (!m_requestActive || !m_provider || !m_activeRequest.stream) {
             return;
         }
 
@@ -291,8 +367,10 @@ void QtLLMClient::wireExecutor()
                                                                                       m_activeRequestId,
                                                                                       response.errorMessage,
                                                                                       QStringLiteral("llm.response"));
-            emit errorOccurred(response.errorMessage);
-            m_streamParser->clear();
+            response.error.category = LlmErrorCategory::Protocol;
+            response.error.code = QStringLiteral("response_parse_failed");
+            response.error.message = response.errorMessage;
+            finishRequest(response);
             return;
         }
 
@@ -330,19 +408,22 @@ void QtLLMClient::wireExecutor()
                 context);
 
             if (outcome.terminatedByFailureGuard) {
+                const QString failureMessage = QStringLiteral("Tool loop stopped after repeated failures");
                 logging::QtLlmLogger::instance().warn(QStringLiteral("tool.loop"),
-                                                      QStringLiteral("Tool loop stopped after repeated failures"),
+                                                      failureMessage,
                                                       logContext(m_toolLoopClientId, m_toolLoopSessionId, m_activeRequestId, m_toolLoopTraceId));
                 toolsinside::ToolsInsideRuntime::instance().recorder()->recordTraceError(m_toolLoopClientId,
                                                                                           m_toolLoopSessionId,
                                                                                           m_toolLoopTraceId,
                                                                                           m_activeRequestId,
-                                                                                          QStringLiteral("Tool loop stopped after repeated failures"),
+                                                                                          failureMessage,
                                                                                           QStringLiteral("tool.loop"));
-                emit errorOccurred(QStringLiteral("Tool loop stopped after repeated failures"));
-                emit responseReceived(response);
-                emit completed(finalText);
-                m_streamParser->clear();
+                response.success = false;
+                response.errorMessage = failureMessage;
+                response.error.category = LlmErrorCategory::Tool;
+                response.error.code = QStringLiteral("tool_failure_guard");
+                response.error.message = failureMessage;
+                finishRequest(response);
                 return;
             }
 
@@ -372,24 +453,51 @@ void QtLLMClient::wireExecutor()
                                                                                       m_activeRequestId,
                                                                                       finalText,
                                                                                       response.finishReason);
-        emit responseReceived(response);
-        emit completed(finalText);
-        m_streamParser->clear();
+        response.text = finalText;
+        finishRequest(response);
     });
 
-    connect(m_executor, &HttpExecutor::errorOccurred, this, [this](const QString &message) {
+    connect(m_executor, &HttpExecutor::attemptReset, this, [this](int, int nextAttempt) {
+        m_accumulatedText.clear();
+        m_accumulatedReasoning.clear();
         m_streamParser->clear();
+        emit streamReset(m_activeRequestId, nextAttempt);
+    });
+
+    connect(m_executor, &HttpExecutor::requestFailed, this, [this](const HttpRequestError &requestError) {
         logging::QtLlmLogger::instance().error(QStringLiteral("llm.request"),
                                                QStringLiteral("HTTP executor reported request error"),
                                                logContext(m_toolLoopClientId, m_toolLoopSessionId, m_activeRequestId, m_toolLoopTraceId),
-                                               QJsonObject{{QStringLiteral("error"), message}});
+                                               QJsonObject{{QStringLiteral("error"), requestError.message},
+                                                           {QStringLiteral("errorCode"), requestError.code},
+                                                           {QStringLiteral("httpStatus"), requestError.httpStatus},
+                                                           {QStringLiteral("attempt"), requestError.attempt}});
         toolsinside::ToolsInsideRuntime::instance().recorder()->recordTraceError(m_toolLoopClientId,
                                                                                   m_toolLoopSessionId,
                                                                                   m_toolLoopTraceId,
                                                                                   m_activeRequestId,
-                                                                                  message,
+                                                                                  requestError.message,
                                                                                   QStringLiteral("llm.request"));
-        emit errorOccurred(message);
+
+        LlmResponse response;
+        response.errorMessage = requestError.message;
+        response.error.code = requestError.code;
+        response.error.message = requestError.message;
+        response.error.diagnostic = requestError.diagnostic;
+        response.error.retryable = requestError.retryable;
+        response.error.httpStatus = requestError.httpStatus;
+        response.error.attempt = requestError.attempt;
+        switch (requestError.category) {
+        case HttpErrorCategory::Canceled:
+            response.error.category = LlmErrorCategory::Canceled;
+            break;
+        case HttpErrorCategory::Timeout:
+        case HttpErrorCategory::Network:
+        case HttpErrorCategory::Http:
+            response.error.category = LlmErrorCategory::Transport;
+            break;
+        }
+        finishRequest(response);
     });
 }
 

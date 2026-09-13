@@ -41,6 +41,13 @@ public:
 signals:
     void tokenReceived(const QString &token);
     void reasoningTokenReceived(const QString &token);
+    void requestStarted(const QString &requestId);
+    void cancellationRequested(const QString &requestId);
+    void streamReset(const QString &requestId, int nextAttempt);
+    void requestFinished(const LlmResponse &response);
+    void requestRejected(const QString &code, const QString &message);
+
+    // Compatibility signals retained for existing integrations.
     void completed(const QString &text);
     void responseReceived(const LlmResponse &response);
     void errorOccurred(const QString &message);
@@ -48,8 +55,10 @@ signals:
 
 private:
     void wireExecutor();
+    void beginRequest();
     void dispatchRequest(const LlmRequest &request);
-    bool ensureManagedRuntime();
+    void finishRequest(LlmResponse response, bool emitCompatibilitySignal = true);
+    bool ensureManagedRuntime(QString *errorMessage = nullptr);
 
 private:
     LlmConfig m_config;
@@ -65,6 +74,8 @@ private:
     QString m_toolLoopClientId;
     QString m_toolLoopSessionId;
     QString m_toolLoopTraceId;
+    bool m_requestActive = false;
+    bool m_terminalEmitted = false;
 };
 
 } // namespace qtllm

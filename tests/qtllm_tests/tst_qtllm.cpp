@@ -24,6 +24,7 @@
 #include "../../src/qtllm/identity/compactid.h"
 #include "../../src/qtllm/logging/filelogsink.h"
 #include "../../src/qtllm/logging/logtypes.h"
+#include "../../src/qtllm/network/httpexecutor.h"
 #include "../../src/qtllm/providers/illmprovider.h"
 #include "../../src/qtllm/providers/openaicompatibleprovider.h"
 #include "../../src/qtllm/providers/openaiprovider.h"
@@ -1277,6 +1278,100 @@ void QtLlmCoreTests::streamChunkParserTakePendingLine()
     parser.append("partial");
     QCOMPARE(parser.takePendingLine(), QStringLiteral("partial"));
     QCOMPARE(parser.takePendingLine(), QString());
+}
+
+void QtLlmCoreTests::httpExecutorRetriesWithFreshBuffer()
+{
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+
+    int connectionCount = 0;
+    connect(&server, &QTcpServer::newConnection, &server, [&]() {
+        while (server.hasPendingConnections()) {
+            QTcpSocket *socket = server.nextPendingConnection();
+            connect(socket, &QTcpSocket::readyRead, socket, [&, socket]() {
+                socket->readAll();
+                ++connectionCount;
+                const QByteArray payload = connectionCount == 1 ? QByteArrayLiteral("first-attempt")
+                                                                  : QByteArrayLiteral("second-attempt");
+                QByteArray response = connectionCount == 1
+                    ? QByteArrayLiteral("HTTP/1.1 503 Service Unavailable\r\n")
+                    : QByteArrayLiteral("HTTP/1.1 200 OK\r\n");
+                response += "Content-Length: " + QByteArray::number(payload.size()) + "\r\n";
+                response += QByteArrayLiteral("Connection: close\r\n\r\n");
+                response += payload;
+                socket->write(response);
+                socket->disconnectFromHost();
+            });
+            connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+        }
+    });
+
+    HttpExecutor executor;
+    QSignalSpy finishedSpy(&executor, &HttpExecutor::requestFinished);
+    QSignalSpy failedSpy(&executor, &HttpExecutor::requestFailed);
+    QSignalSpy resetSpy(&executor, &HttpExecutor::attemptReset);
+    HttpRequestOptions options;
+    options.timeoutMs = 2000;
+    options.maxRetries = 1;
+    options.retryDelayMs = 10;
+    executor.post(QNetworkRequest(QUrl(QStringLiteral("http://127.0.0.1:%1/test").arg(server.serverPort()))),
+                  QByteArrayLiteral("{}"), options);
+
+    QTRY_COMPARE_WITH_TIMEOUT(finishedSpy.count(), 1, 3000);
+    QCOMPARE(failedSpy.count(), 0);
+    QCOMPARE(resetSpy.count(), 1);
+    QCOMPARE(connectionCount, 2);
+    QCOMPARE(finishedSpy.first().at(0).toByteArray(), QByteArrayLiteral("second-attempt"));
+}
+
+void QtLlmCoreTests::httpExecutorCancelDuringRetryBackoffDoesNotRestart()
+{
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+
+    int connectionCount = 0;
+    connect(&server, &QTcpServer::newConnection, &server, [&]() {
+        while (server.hasPendingConnections()) {
+            QTcpSocket *socket = server.nextPendingConnection();
+            connect(socket, &QTcpSocket::readyRead, socket, [&, socket]() {
+                socket->readAll();
+                ++connectionCount;
+                const QByteArray payload = QByteArrayLiteral("retry-later");
+                QByteArray response = QByteArrayLiteral("HTTP/1.1 503 Service Unavailable\r\n");
+                response += "Content-Length: " + QByteArray::number(payload.size()) + "\r\n";
+                response += QByteArrayLiteral("Connection: close\r\n\r\n");
+                response += payload;
+                socket->write(response);
+                socket->disconnectFromHost();
+            });
+            connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+        }
+    });
+
+    HttpExecutor executor;
+    QSignalSpy attemptSpy(&executor, &HttpExecutor::attemptStarted);
+    QSignalSpy resetSpy(&executor, &HttpExecutor::attemptReset);
+    QSignalSpy failedSpy(&executor, &HttpExecutor::requestFailed);
+    QSignalSpy finishedSpy(&executor, &HttpExecutor::requestFinished);
+    HttpRequestOptions options;
+    options.timeoutMs = 2000;
+    options.maxRetries = 2;
+    options.retryDelayMs = 500;
+    executor.post(QNetworkRequest(QUrl(QStringLiteral("http://127.0.0.1:%1/test").arg(server.serverPort()))),
+                  QByteArrayLiteral("{}"), options);
+
+    QTRY_COMPARE_WITH_TIMEOUT(resetSpy.count(), 1, 2000);
+    executor.cancel();
+    QTRY_COMPARE_WITH_TIMEOUT(failedSpy.count(), 1, 1000);
+    QTest::qWait(650);
+
+    QCOMPARE(attemptSpy.count(), 1);
+    QCOMPARE(connectionCount, 1);
+    QCOMPARE(finishedSpy.count(), 0);
+    const HttpRequestError error = qvariant_cast<HttpRequestError>(failedSpy.first().at(0));
+    QCOMPARE(error.category, HttpErrorCategory::Canceled);
+    QCOMPARE(error.code, QStringLiteral("request_canceled"));
 }
 
 int main(int argc, char *argv[])
