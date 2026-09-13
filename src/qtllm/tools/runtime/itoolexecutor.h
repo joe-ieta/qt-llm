@@ -15,6 +15,8 @@ public:
     virtual ToolExecutionResult execute(const ToolCallRequest &request,
                                         const ToolExecutionContext &context) = 0;
 
+    virtual bool supportsCancellation() const { return false; }
+
     virtual bool cancel(const QString &callId)
     {
         Q_UNUSED(callId)

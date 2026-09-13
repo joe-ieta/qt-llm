@@ -58,6 +58,10 @@ private slots:
     void providersMapNativeStructuredOutput();
     void toolPreparationReportsAuthorizationAndLimits();
     void toolOrchestratorExternalModePairsResults();
+    void toolExecutionRunsOptInParallel();
+    void toolExecutionRetriesOnlyWithIdempotency();
+    void toolExecutionReportsTimeout();
+    void toolExecutionCancellationIsObservable();
     void streamChunkParserHandlesFragmentedInput();
     void streamChunkParserTakePendingLine();
 };

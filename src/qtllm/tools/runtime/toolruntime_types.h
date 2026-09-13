@@ -62,6 +62,7 @@ struct ToolCallRequest
     QString toolId;
     QJsonObject arguments;
     QString idempotencyKey;
+    bool retryAllowed = false;
 };
 
 struct ToolExecutionResult
@@ -78,6 +79,8 @@ struct ToolExecutionResult
     bool retryable = false;
     ToolExecutionStatus status = ToolExecutionStatus::Pending;
     bool cancelSupported = false;
+    int attemptCount = 0;
+    bool timedOut = false;
 };
 
 struct ToolBatchPreparation
@@ -93,6 +96,7 @@ struct ToolExecutionPolicy
     int defaultTimeoutMs = 30000;
     int maxRetries = 0;
     bool failFast = false;
+    bool enableParallelExecution = false;
     QHash<QString, int> toolTimeoutOverrides;
     QHash<QString, int> toolConcurrencyOverrides;
 

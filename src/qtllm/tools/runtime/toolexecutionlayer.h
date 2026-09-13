@@ -5,7 +5,9 @@
 #include "toolruntimehooks.h"
 #include "../llmtoolregistry.h"
 
+#include <QHash>
 #include <QList>
+#include <QMutex>
 
 #include <memory>
 
@@ -42,6 +44,18 @@ public:
     bool cancelBySession(const QString &clientId, const QString &sessionId) const;
 
 private:
+    struct ActiveExecution
+    {
+        QString callId;
+        std::shared_ptr<IToolExecutor> executor;
+    };
+
+    struct ActiveExecutionState
+    {
+        QMutex mutex;
+        QHash<QString, QList<ActiveExecution>> executions;
+    };
+
     QString resolveToolId(const QString &toolIdOrName) const;
     ToolExecutionResult executeSingle(const ToolCallRequest &request,
                                       const ToolExecutionContext &context,
@@ -58,6 +72,8 @@ private:
     bool m_dryRunFailureMode = false;
     std::shared_ptr<mcp::IMcpClient> m_mcpClient;
     std::shared_ptr<mcp::McpServerRegistry> m_mcpServerRegistry;
+    std::shared_ptr<ActiveExecutionState> m_activeState =
+        std::make_shared<ActiveExecutionState>();
 };
 
 } // namespace qtllm::tools::runtime

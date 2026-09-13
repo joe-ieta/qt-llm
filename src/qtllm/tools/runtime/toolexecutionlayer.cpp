@@ -10,6 +10,9 @@
 #include <QElapsedTimer>
 #include <QJsonObject>
 
+#include <future>
+#include <vector>
+
 namespace qtllm::tools::runtime {
 
 namespace {
@@ -136,30 +139,60 @@ QList<ToolExecutionResult> ToolExecutionLayer::executeBatch(const QList<ToolCall
                                                             const ToolExecutionContext &context,
                                                             const ClientToolPolicy &clientPolicy) const
 {
-    QList<ToolExecutionResult> results;
-    if (requests.isEmpty()) {
+    const ToolBatchPreparation preparation = prepareBatch(requests, context, clientPolicy);
+    QList<ToolExecutionResult> results = preparation.terminalResults;
+    const QList<ToolCallRequest> &readyRequests = preparation.readyRequests;
+    if (readyRequests.isEmpty()) {
         return results;
     }
 
-    const int limit = qMax(1, clientPolicy.maxToolsPerTurn > 0 ? clientPolicy.maxToolsPerTurn : m_policy.maxParallelCalls);
-    const int count = qMin(limit, requests.size());
     logging::QtLlmLogger::instance().debug(QStringLiteral("tool.execution"),
                                            QStringLiteral("Executing tool batch"),
                                            logContextFromExecution(context),
                                            QJsonObject{{QStringLiteral("requestedCount"), requests.size()},
-                                                       {QStringLiteral("executedCount"), count}});
+                                                       {QStringLiteral("executedCount"), readyRequests.size()},
+                                                       {QStringLiteral("parallel"), m_policy.enableParallelExecution}});
 
-    for (int i = 0; i < count; ++i) {
-        ToolExecutionResult result = executeSingle(requests.at(i), context, clientPolicy);
-        results.append(result);
+    if (!m_policy.enableParallelExecution || m_policy.failFast || readyRequests.size() < 2) {
+        for (const ToolCallRequest &request : readyRequests) {
+            ToolExecutionResult result = executeSingle(request, context, clientPolicy);
+            results.append(result);
+            if (m_policy.failFast && !result.success) {
+                logging::QtLlmLogger::instance().warn(
+                    QStringLiteral("tool.execution"),
+                    QStringLiteral("Tool batch aborted because fail-fast is enabled"),
+                    logContextFromExecution(context),
+                    QJsonObject{{QStringLiteral("toolId"), result.toolId},
+                                {QStringLiteral("callId"), result.callId}});
+                break;
+            }
+        }
+        return results;
+    }
 
-        if (m_policy.failFast && !result.success) {
-            logging::QtLlmLogger::instance().warn(QStringLiteral("tool.execution"),
-                                                  QStringLiteral("Tool batch aborted because fail-fast is enabled"),
-                                                  logContextFromExecution(context),
-                                                  QJsonObject{{QStringLiteral("toolId"), result.toolId},
-                                                              {QStringLiteral("callId"), result.callId}});
-            break;
+    int parallelLimit = qMax(1, m_policy.maxParallelCalls);
+    for (const ToolCallRequest &request : readyRequests) {
+        const int toolLimit = m_policy.toolConcurrencyOverrides.value(request.toolId, 0);
+        if (toolLimit > 0) {
+            parallelLimit = qMin(parallelLimit, toolLimit);
+        }
+    }
+
+    for (int offset = 0; offset < readyRequests.size(); offset += parallelLimit) {
+        const int batchSize = qMin(parallelLimit, readyRequests.size() - offset);
+        std::vector<std::future<ToolExecutionResult>> futures;
+        futures.reserve(static_cast<std::size_t>(batchSize));
+        for (int index = 0; index < batchSize; ++index) {
+            const ToolCallRequest request = readyRequests.at(offset + index);
+            futures.emplace_back(std::async(std::launch::async,
+                                            [this, request, context, clientPolicy]() {
+                                                return executeSingle(request,
+                                                                     context,
+                                                                     clientPolicy);
+                                            }));
+        }
+        for (std::future<ToolExecutionResult> &future : futures) {
+            results.append(future.get());
         }
     }
 
@@ -168,9 +201,20 @@ QList<ToolExecutionResult> ToolExecutionLayer::executeBatch(const QList<ToolCall
 
 bool ToolExecutionLayer::cancelBySession(const QString &clientId, const QString &sessionId) const
 {
-    Q_UNUSED(clientId)
-    Q_UNUSED(sessionId)
-    return false;
+    const QString key = clientId + QChar(0x1f) + sessionId;
+    QList<ActiveExecution> active;
+    {
+        QMutexLocker locker(&m_activeState->mutex);
+        active = m_activeState->executions.value(key);
+    }
+
+    bool canceled = false;
+    for (const ActiveExecution &execution : active) {
+        if (execution.executor && execution.executor->supportsCancellation()) {
+            canceled = execution.executor->cancel(execution.callId) || canceled;
+        }
+    }
+    return canceled;
 }
 
 QString ToolExecutionLayer::resolveToolId(const QString &toolIdOrName) const
@@ -215,6 +259,10 @@ ToolExecutionResult ToolExecutionLayer::executeSingle(const ToolCallRequest &req
         }
         if (out.toolId.isEmpty()) {
             out.toolId = resolvedRequest.toolId;
+        }
+        if (out.status == ToolExecutionStatus::Pending) {
+            out.status = out.success ? ToolExecutionStatus::Succeeded
+                                     : ToolExecutionStatus::Failed;
         }
         events::LlmEventDispatcher::instance().recordToolCallFinished(context,
                                                                                        context.requestId,
@@ -289,7 +337,44 @@ ToolExecutionResult ToolExecutionLayer::executeSingle(const ToolCallRequest &req
     QElapsedTimer timer;
     timer.start();
 
-    ToolExecutionResult executed = executor->execute(resolvedRequest, context);
+    const int timeoutMs = m_policy.toolTimeoutOverrides.value(
+        resolvedRequest.toolId, m_policy.defaultTimeoutMs);
+    const int retryCount = resolvedRequest.retryAllowed
+            && !resolvedRequest.idempotencyKey.trimmed().isEmpty()
+        ? qMax(0, m_policy.maxRetries)
+        : 0;
+    const QString sessionKey = context.clientId + QChar(0x1f) + context.sessionId;
+    ToolExecutionResult executed;
+    for (int attempt = 0; attempt <= retryCount; ++attempt) {
+        {
+            QMutexLocker locker(&m_activeState->mutex);
+            m_activeState->executions[sessionKey].append(
+                {resolvedRequest.callId, executor});
+        }
+
+        executed = executor->execute(resolvedRequest, context);
+
+        {
+            QMutexLocker locker(&m_activeState->mutex);
+            auto activeIt = m_activeState->executions.find(sessionKey);
+            if (activeIt != m_activeState->executions.end()) {
+                for (int index = 0; index < activeIt->size(); ++index) {
+                    if (activeIt->at(index).callId == resolvedRequest.callId) {
+                        activeIt->removeAt(index);
+                        break;
+                    }
+                }
+                if (activeIt->isEmpty()) {
+                    m_activeState->executions.erase(activeIt);
+                }
+            }
+        }
+
+        executed.attemptCount = attempt + 1;
+        if (executed.success || !executed.retryable || attempt == retryCount) {
+            break;
+        }
+    }
     if (executed.callId.isEmpty()) {
         executed.callId = resolvedRequest.callId;
     }
@@ -305,6 +390,18 @@ ToolExecutionResult ToolExecutionLayer::executeSingle(const ToolCallRequest &req
         executed.toolId = resolvedRequest.toolId;
     }
     executed.durationMs = timer.elapsed();
+    executed.cancelSupported = executor->supportsCancellation();
+    if (timeoutMs > 0 && executed.durationMs > timeoutMs) {
+        executed.success = false;
+        executed.timedOut = true;
+        executed.status = ToolExecutionStatus::TimedOut;
+        executed.errorCode = QStringLiteral("tool_timeout");
+        executed.errorMessage =
+            QStringLiteral("Tool execution exceeded the configured timeout");
+        if (executed.cancelSupported) {
+            executor->cancel(resolvedRequest.callId);
+        }
+    }
 
     logging::QtLlmLogger::instance().info(QStringLiteral("tool.execution"),
                                           executed.success

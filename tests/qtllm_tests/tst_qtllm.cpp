@@ -17,6 +17,12 @@
 
 #include "tst_qtllm.h"
 
+#include <QThread>
+
+#include <atomic>
+#include <future>
+#include <utility>
+
 #include "../../src/qtllm/chat/conversationclient.h"
 #include "../../src/qtllm/chat/conversationclientfactory.h"
 #include "../../src/qtllm/core/llmconfig.h"
@@ -1769,6 +1775,237 @@ void QtLlmCoreTests::toolOrchestratorExternalModePairsResults()
     QCOMPARE(completed.toolResults.size(), 1);
     QCOMPARE(completed.toolResults.first().callId, QStringLiteral("provider-call"));
     QCOMPARE(completed.toolResults.first().status, ToolExecutionStatus::Succeeded);
+}
+
+namespace {
+
+using namespace qtllm::tools::runtime;
+
+struct ToolConcurrencyProbe
+{
+    std::atomic<int> active {0};
+    std::atomic<int> peak {0};
+};
+
+class ControlledToolExecutor final : public IToolExecutor
+{
+public:
+    ControlledToolExecutor(QString id,
+                           int delayMs,
+                           int failuresBeforeSuccess = 0,
+                           bool cancellable = false,
+                           std::shared_ptr<ToolConcurrencyProbe> probe = {})
+        : m_id(std::move(id))
+        , m_delayMs(delayMs)
+        , m_failuresBeforeSuccess(failuresBeforeSuccess)
+        , m_cancellable(cancellable)
+        , m_probe(std::move(probe))
+    {
+    }
+
+    QString toolId() const override { return m_id; }
+
+    ToolExecutionResult execute(const ToolCallRequest &,
+                                const ToolExecutionContext &) override
+    {
+        m_started.store(true);
+        const int attempt = m_attempts.fetch_add(1) + 1;
+        if (m_probe) {
+            const int active = m_probe->active.fetch_add(1) + 1;
+            int peak = m_probe->peak.load();
+            while (active > peak
+                   && !m_probe->peak.compare_exchange_weak(peak, active)) {
+            }
+        }
+
+        int elapsed = 0;
+        while (elapsed < m_delayMs && !m_canceled.load()) {
+            QThread::msleep(5);
+            elapsed += 5;
+        }
+        if (m_probe) {
+            m_probe->active.fetch_sub(1);
+        }
+
+        ToolExecutionResult result;
+        if (m_canceled.load()) {
+            result.status = ToolExecutionStatus::Canceled;
+            return result;
+        }
+        result.success = attempt > m_failuresBeforeSuccess;
+        result.retryable = !result.success;
+        return result;
+    }
+
+    bool supportsCancellation() const override { return m_cancellable; }
+
+    bool cancel(const QString &) override
+    {
+        if (!m_cancellable) {
+            return false;
+        }
+        m_canceled.store(true);
+        return true;
+    }
+
+    int attempts() const { return m_attempts.load(); }
+    bool started() const { return m_started.load(); }
+
+private:
+    QString m_id;
+    int m_delayMs = 0;
+    int m_failuresBeforeSuccess = 0;
+    bool m_cancellable = false;
+    std::shared_ptr<ToolConcurrencyProbe> m_probe;
+    std::atomic<int> m_attempts {0};
+    std::atomic<bool> m_started {false};
+    std::atomic<bool> m_canceled {false};
+};
+
+ToolCallRequest makeToolRequest(const QString &callId, const QString &toolId)
+{
+    ToolCallRequest request;
+    request.callId = callId;
+    request.toolId = toolId;
+    return request;
+}
+
+ToolExecutionContext makeToolContext(const QString &sessionId)
+{
+    ToolExecutionContext context;
+    context.clientId = QStringLiteral("qtllm-tests");
+    context.sessionId = sessionId;
+    return context;
+}
+
+} // namespace
+
+void QtLlmCoreTests::toolExecutionRunsOptInParallel()
+{
+    using namespace qtllm::tools::runtime;
+
+    const auto probe = std::make_shared<ToolConcurrencyProbe>();
+    const auto registry = std::make_shared<ToolExecutorRegistry>();
+    registry->registerExecutor(std::make_shared<ControlledToolExecutor>(
+        QStringLiteral("parallel-a"), 80, 0, false, probe));
+    registry->registerExecutor(std::make_shared<ControlledToolExecutor>(
+        QStringLiteral("parallel-b"), 80, 0, false, probe));
+
+    ToolExecutionLayer layer;
+    layer.setRegistry(registry);
+    ToolExecutionPolicy policy;
+    policy.enableParallelExecution = true;
+    policy.maxParallelCalls = 2;
+    layer.setPolicy(policy);
+
+    ClientToolPolicy clientPolicy;
+    clientPolicy.maxToolsPerTurn = 2;
+    const QList<ToolExecutionResult> results = layer.executeBatch(
+        {makeToolRequest(QStringLiteral("parallel-call-a"),
+                         QStringLiteral("parallel-a")),
+         makeToolRequest(QStringLiteral("parallel-call-b"),
+                         QStringLiteral("parallel-b"))},
+        makeToolContext(QStringLiteral("parallel-session")),
+        clientPolicy);
+
+    QCOMPARE(results.size(), 2);
+    QCOMPARE(probe->peak.load(), 2);
+}
+
+void QtLlmCoreTests::toolExecutionRetriesOnlyWithIdempotency()
+{
+    using namespace qtllm::tools::runtime;
+
+    const auto retrying = std::make_shared<ControlledToolExecutor>(
+        QStringLiteral("retrying"), 0, 1);
+    const auto nonIdempotent = std::make_shared<ControlledToolExecutor>(
+        QStringLiteral("non-idempotent"), 0, 1);
+    const auto registry = std::make_shared<ToolExecutorRegistry>();
+    registry->registerExecutor(retrying);
+    registry->registerExecutor(nonIdempotent);
+
+    ToolExecutionLayer layer;
+    layer.setRegistry(registry);
+    ToolExecutionPolicy policy;
+    policy.maxRetries = 1;
+    layer.setPolicy(policy);
+
+    ToolCallRequest retryRequest = makeToolRequest(
+        QStringLiteral("retry-call"), QStringLiteral("retrying"));
+    retryRequest.retryAllowed = true;
+    retryRequest.idempotencyKey = QStringLiteral("retry-key");
+    ToolCallRequest singleRequest = makeToolRequest(
+        QStringLiteral("single-call"), QStringLiteral("non-idempotent"));
+    singleRequest.retryAllowed = true;
+
+    ClientToolPolicy clientPolicy;
+    clientPolicy.maxToolsPerTurn = 2;
+    const QList<ToolExecutionResult> results = layer.executeBatch(
+        {retryRequest, singleRequest},
+        makeToolContext(QStringLiteral("retry-session")),
+        clientPolicy);
+
+    QCOMPARE(results.size(), 2);
+    QCOMPARE(retrying->attempts(), 2);
+    QCOMPARE(nonIdempotent->attempts(), 1);
+    QCOMPARE(results.at(0).attemptCount, 2);
+    QCOMPARE(results.at(1).attemptCount, 1);
+}
+
+void QtLlmCoreTests::toolExecutionReportsTimeout()
+{
+    using namespace qtllm::tools::runtime;
+
+    const auto registry = std::make_shared<ToolExecutorRegistry>();
+    registry->registerExecutor(std::make_shared<ControlledToolExecutor>(
+        QStringLiteral("timeout"), 30));
+
+    ToolExecutionLayer layer;
+    layer.setRegistry(registry);
+    ToolExecutionPolicy policy;
+    policy.defaultTimeoutMs = 5;
+    layer.setPolicy(policy);
+
+    const QList<ToolExecutionResult> results = layer.executeBatch(
+        {makeToolRequest(QStringLiteral("timeout-call"),
+                         QStringLiteral("timeout"))},
+        makeToolContext(QStringLiteral("timeout-session")));
+
+    QCOMPARE(results.size(), 1);
+    QVERIFY(results.first().timedOut);
+    QCOMPARE(results.first().status, ToolExecutionStatus::TimedOut);
+}
+
+void QtLlmCoreTests::toolExecutionCancellationIsObservable()
+{
+    using namespace qtllm::tools::runtime;
+
+    const auto executor = std::make_shared<ControlledToolExecutor>(
+        QStringLiteral("cancel"), 2000, 0, true);
+    const auto registry = std::make_shared<ToolExecutorRegistry>();
+    registry->registerExecutor(executor);
+
+    ToolExecutionLayer layer;
+    layer.setRegistry(registry);
+    const ToolExecutionContext context =
+        makeToolContext(QStringLiteral("cancel-session"));
+    auto future = std::async(std::launch::async, [&]() {
+        return layer.executeBatch(
+            {makeToolRequest(QStringLiteral("cancel-call"),
+                             QStringLiteral("cancel"))},
+            context);
+    });
+
+    for (int index = 0; index < 100 && !executor->started(); ++index) {
+        QThread::msleep(5);
+    }
+    QVERIFY(executor->started());
+    QVERIFY(layer.cancelBySession(context.clientId, context.sessionId));
+
+    const QList<ToolExecutionResult> results = future.get();
+    QCOMPARE(results.size(), 1);
+    QCOMPARE(results.first().status, ToolExecutionStatus::Canceled);
+    QVERIFY(results.first().cancelSupported);
 }
 
 int main(int argc, char *argv[])

@@ -29,6 +29,19 @@ Pending 不是失败结果，宿主应等待用户或策略系统决定后重新
 
 prepareBatch 按 ClientToolPolicy::maxToolsPerTurn 处理批次。超出部分产生 tool_limit_exceeded 和 LimitExceeded 状态，不再静默丢弃。
 
-## 当前阶段边界
+## 执行治理规则
 
-阶段一不改变 Internal 默认行为，也不改变 MCP 客户端消费和 MCP Server 发布边界。真实并发调度、活动取消、同步执行超时和副作用重试规则将在 QTL-06 后续阶段完成。
+- 默认顺序执行，只有 `ToolExecutionPolicy::enableParallelExecution` 显式开启后才并发。
+- 并发上限同时受全局 `maxParallelCalls` 和工具级 `toolConcurrencyOverrides` 约束。
+- 只有调用显式设置 `retryAllowed` 且提供非空 `idempotencyKey` 时，失败结果才可按 `maxRetries` 重试。
+- 超过工具级或默认超时时间的调用返回 `TimedOut`，并向支持取消的执行器发送尽力取消请求。
+- `cancelBySession` 只传播给当前会话中仍在执行且声明支持取消的执行器。
+- 外部模式仍由宿主负责实际调度、取消和超时；qt-llm 负责预检、配对结果并恢复工具循环。
+
+## 并发和超时边界
+
+启用并发后，调用方提供的执行器、事件接收方、日志接收方和运行时钩子必须支持并发调用。默认关闭并发，因此既有调用仍保持顺序行为。
+
+同步执行器接口无法强制终止忽略取消的底层调用，超时状态会在执行返回后判定。需要严格截止时间的工具应在执行器内部实现可中断 I/O，并通过 `supportsCancellation()` 和 `cancel()` 接入取消传播。
+
+上述能力不改变 MCP 客户端消费与 MCP Server 发布的边界，也不引入业务工具或工作流编排。
