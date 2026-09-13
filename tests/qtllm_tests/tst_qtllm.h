@@ -50,6 +50,8 @@ private slots:
     void httpExecutorRetriesWithFreshBuffer();
     void httpExecutorCancelDuringRetryBackoffDoesNotRestart();
     void llmEventDispatcherFansOutAndDetachesSinks();
+    void runtimeProfileMapperUsesStructuredMessages();
+    void runtimeFacadeParallelHandlesKeepRequestAttribution();
     void streamChunkParserHandlesFragmentedInput();
     void streamChunkParserTakePendingLine();
 };

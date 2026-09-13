@@ -22,6 +22,9 @@
 #include "../../src/qtllm/core/llmconfig.h"
 #include "../../src/qtllm/core/llmtypes.h"
 #include "../../src/qtllm/events/llmeventdispatcher.h"
+#include "../../src/qtllm/host/runtimefacade.h"
+#include "../../src/qtllm/host/runtimeprofilemapper.h"
+#include "../../src/qtllm/host/runtimerequesthandle.h"
 #include "../../src/qtllm/identity/compactid.h"
 #include "../../src/qtllm/logging/filelogsink.h"
 #include "../../src/qtllm/logging/logtypes.h"
@@ -1433,6 +1436,92 @@ void QtLlmCoreTests::llmEventDispatcherFansOutAndDetachesSinks()
     dispatcher.recordTraceError(QString(), QString(), QString(), QStringLiteral("ignored"),
                                 QStringLiteral("ignored"), QStringLiteral("test"));
     QCOMPARE(sink->events.size(), 3);
+}
+
+void QtLlmCoreTests::runtimeProfileMapperUsesStructuredMessages()
+{
+    host::RuntimeProfile profile;
+    profile.model = QStringLiteral("profile-model");
+    profile.stream = false;
+
+    host::ChatRequest request;
+    request.systemPrompt = QStringLiteral("ignored-system");
+    request.userPrompt = QStringLiteral("ignored-user");
+    request.model = QStringLiteral("request-model");
+    request.messages.append({QStringLiteral("system"), QStringLiteral("structured-system")});
+    request.messages.append({QStringLiteral("user"), QStringLiteral("structured-user")});
+    request.tools.append(QJsonObject{{QStringLiteral("type"), QStringLiteral("function")}});
+
+    const LlmRequest mapped = host::RuntimeProfileMapper::toRequest(profile, request);
+    QCOMPARE(mapped.model, QStringLiteral("request-model"));
+    QCOMPARE(mapped.stream, false);
+    QCOMPARE(mapped.messages.size(), 2);
+    QCOMPARE(mapped.messages.at(0).content, QStringLiteral("structured-system"));
+    QCOMPARE(mapped.messages.at(1).content, QStringLiteral("structured-user"));
+    QCOMPARE(mapped.tools.size(), 1);
+}
+
+void QtLlmCoreTests::runtimeFacadeParallelHandlesKeepRequestAttribution()
+{
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+
+    int connectionCount = 0;
+    connect(&server, &QTcpServer::newConnection, &server, [&]() {
+        while (server.hasPendingConnections()) {
+            QTcpSocket *socket = server.nextPendingConnection();
+            connect(socket, &QTcpSocket::readyRead, socket, [&, socket]() {
+                socket->readAll();
+                ++connectionCount;
+                const QByteArray payload = QByteArrayLiteral(
+                    R"({"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]})");
+                QByteArray response = QByteArrayLiteral("HTTP/1.1 200 OK\r\n");
+                response += QByteArrayLiteral("Content-Type: application/json\r\n");
+                response += "Content-Length: " + QByteArray::number(payload.size()) + "\r\n";
+                response += QByteArrayLiteral("Connection: close\r\n\r\n");
+                response += payload;
+                socket->write(response);
+                socket->disconnectFromHost();
+            });
+            connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+        }
+    });
+
+    host::RuntimeProfile profile;
+    profile.providerName = QStringLiteral("openai-compatible");
+    profile.baseUrl = QStringLiteral("http://127.0.0.1:%1/v1/chat/completions")
+                          .arg(server.serverPort());
+    profile.model = QStringLiteral("test-model");
+    profile.stream = false;
+
+    host::RuntimeFacade facade;
+    facade.setProfile(profile);
+
+    host::ChatRequest firstRequest;
+    firstRequest.messages.append({QStringLiteral("user"), QStringLiteral("first")});
+    host::ChatRequest secondRequest;
+    secondRequest.messages.append({QStringLiteral("user"), QStringLiteral("second")});
+
+    host::RuntimeRequestHandle *first = facade.sendAsync(firstRequest);
+    host::RuntimeRequestHandle *second = facade.sendAsync(secondRequest);
+    QSignalSpy firstFinished(first, &host::RuntimeRequestHandle::finished);
+    QSignalSpy secondFinished(second, &host::RuntimeRequestHandle::finished);
+
+    QTRY_COMPARE_WITH_TIMEOUT(firstFinished.count(), 1, 3000);
+    QTRY_COMPARE_WITH_TIMEOUT(secondFinished.count(), 1, 3000);
+    QCOMPARE(connectionCount, 2);
+
+    const host::ChatResult firstResult =
+        qvariant_cast<host::ChatResult>(firstFinished.first().at(0));
+    const host::ChatResult secondResult =
+        qvariant_cast<host::ChatResult>(secondFinished.first().at(0));
+    QVERIFY(firstResult.success);
+    QVERIFY(secondResult.success);
+    QCOMPARE(firstResult.requestId, first->requestId());
+    QCOMPARE(secondResult.requestId, second->requestId());
+    QVERIFY(firstResult.requestId != secondResult.requestId);
+    QCOMPARE(firstResult.text, QStringLiteral("ok"));
+    QCOMPARE(secondResult.text, QStringLiteral("ok"));
 }
 
 int main(int argc, char *argv[])

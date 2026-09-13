@@ -1,5 +1,7 @@
 #include "runtimefacade.h"
 
+#include "runtimerequesthandle.h"
+
 #include "runtimeprofilemapper.h"
 #include "../core/qtllmclient.h"
 #include "../events/llmeventdispatcher.h"
@@ -112,6 +114,13 @@ bool RuntimeFacade::refreshRuntimeAvailability(QString *message)
     return available;
 }
 
+RuntimeRequestHandle *RuntimeFacade::sendAsync(const ChatRequest &request)
+{
+    auto *handle = new RuntimeRequestHandle(m_profile, request, this);
+    QTimer::singleShot(0, handle, &RuntimeRequestHandle::start);
+    return handle;
+}
+
 void RuntimeFacade::send(const ChatRequest &request)
 {
     if (m_requestActive) {
@@ -120,7 +129,7 @@ void RuntimeFacade::send(const ChatRequest &request)
                         QStringLiteral("RuntimeFacade already has an active request"));
         return;
     }
-    if (request.userPrompt.trimmed().isEmpty()) {
+    if (request.messages.isEmpty() && request.userPrompt.trimmed().isEmpty()) {
         finishWithError(request,
                         QStringLiteral("empty_prompt"),
                         QStringLiteral("ChatRequest.userPrompt is empty"));

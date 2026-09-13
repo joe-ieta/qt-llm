@@ -11,6 +11,8 @@ class QtLLMClient;
 
 namespace qtllm::host {
 
+class RuntimeRequestHandle;
+
 class RuntimeFacade : public QObject
 {
     Q_OBJECT
@@ -24,6 +26,7 @@ public:
     QList<LocalModelInfo> listLocalModels(QString *errorMessage = nullptr) const;
     bool refreshRuntimeAvailability(QString *message = nullptr);
 
+    RuntimeRequestHandle *sendAsync(const ChatRequest &request);
     void send(const ChatRequest &request);
     ChatResult sendBlocking(const ChatRequest &request, int timeoutMs = 0);
     void cancel();

@@ -35,6 +35,9 @@ struct LlmRequest
 
     // OpenAI-compatible tools schema array.
     QJsonArray tools;
+
+    // Optional caller-supplied logical request ID.
+    QString requestId;
 };
 
 enum class LlmErrorCategory

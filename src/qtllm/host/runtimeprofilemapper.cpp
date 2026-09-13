@@ -83,12 +83,19 @@ RuntimeProfile RuntimeProfileMapper::fromConfig(const LlmConfig &config)
 LlmRequest RuntimeProfileMapper::toRequest(const RuntimeProfile &profile, const ChatRequest &request)
 {
     LlmRequest llmRequest;
-    llmRequest.model = profile.model.trimmed();
+    llmRequest.model = request.model.trimmed().isEmpty() ? profile.model.trimmed() : request.model.trimmed();
     llmRequest.stream = profile.stream;
+    llmRequest.tools = request.tools;
+    if (!request.messages.isEmpty()) {
+        llmRequest.messages = request.messages;
+        return llmRequest;
+    }
     if (!request.systemPrompt.trimmed().isEmpty()) {
         llmRequest.messages.append({QStringLiteral("system"), request.systemPrompt.trimmed()});
     }
-    llmRequest.messages.append({QStringLiteral("user"), request.userPrompt.trimmed()});
+    if (!request.userPrompt.trimmed().isEmpty()) {
+        llmRequest.messages.append({QStringLiteral("user"), request.userPrompt.trimmed()});
+    }
     return llmRequest;
 }
 

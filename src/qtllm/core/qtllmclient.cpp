@@ -119,7 +119,7 @@ void QtLLMClient::sendRequest(const LlmRequest &request)
         return;
     }
 
-    beginRequest();
+    beginRequest(request.requestId);
 
     if (!m_provider) {
         if (!m_config.providerName.isEmpty()) {
@@ -175,11 +175,13 @@ void QtLLMClient::cancelCurrentRequest()
     m_executor->cancel();
 }
 
-void QtLLMClient::beginRequest()
+void QtLLMClient::beginRequest(const QString &requestId)
 {
     m_requestActive = true;
     m_terminalEmitted = false;
-    m_activeRequestId = identity::generateId(identity::IdKind::Request);
+    m_activeRequestId = requestId.trimmed().isEmpty()
+        ? identity::generateId(identity::IdKind::Request)
+        : requestId.trimmed();
     if (m_toolLoopTraceId.trimmed().isEmpty()) {
         m_toolLoopTraceId = identity::generateId(identity::IdKind::Trace);
     }

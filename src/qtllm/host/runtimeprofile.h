@@ -1,11 +1,23 @@
 #pragma once
 
+#include "../core/llmtypes.h"
+
 #include <QMetaType>
 #include <QString>
 #include <QStringList>
 #include <QVariantMap>
 
 namespace qtllm::host {
+
+enum class RuntimeRequestState
+{
+    Pending,
+    Running,
+    CancelRequested,
+    Succeeded,
+    Failed,
+    Canceled
+};
 
 struct RuntimeProfile
 {
@@ -56,6 +68,12 @@ struct ChatRequest
     QString sessionId;
     QString traceId;
     QVariantMap metadata;
+
+    // Structured requests take precedence over the convenience prompt fields.
+    // Keep extension fields last to preserve existing aggregate initialization.
+    QVector<qtllm::LlmMessage> messages;
+    QJsonArray tools;
+    QString model;
 };
 
 struct ChatResult
@@ -70,6 +88,10 @@ struct ChatResult
     QString errorCode;
     QString errorMessage;
     QVariantMap metadata;
+    QString requestId;
+    bool canceled = false;
+    qtllm::LlmError error;
+    qtllm::LlmResponse response;
 };
 
 struct LocalModelInfo
@@ -85,6 +107,7 @@ struct LocalModelInfo
 } // namespace qtllm::host
 
 Q_DECLARE_METATYPE(qtllm::host::RuntimeProfile)
+Q_DECLARE_METATYPE(qtllm::host::RuntimeRequestState)
 Q_DECLARE_METATYPE(qtllm::host::ChatRequest)
 Q_DECLARE_METATYPE(qtllm::host::ChatResult)
 Q_DECLARE_METATYPE(qtllm::host::LocalModelInfo)

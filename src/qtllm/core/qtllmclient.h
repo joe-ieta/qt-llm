@@ -55,7 +55,7 @@ signals:
 
 private:
     void wireExecutor();
-    void beginRequest();
+    void beginRequest(const QString &requestId = QString());
     void dispatchRequest(const LlmRequest &request);
     void finishRequest(LlmResponse response, bool emitCompatibilitySignal = true);
     bool ensureManagedRuntime(QString *errorMessage = nullptr);
