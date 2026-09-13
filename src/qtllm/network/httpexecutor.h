@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../qtllm_global.h"
+
 #include <QByteArray>
 #include <QMetaType>
 #include <QNetworkRequest>
@@ -38,7 +40,7 @@ struct HttpRequestError
     int attempt = 0;
 };
 
-class HttpExecutor : public QObject
+class QTLLM_CORE_EXPORT HttpExecutor : public QObject
 {
     Q_OBJECT
 public:

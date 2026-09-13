@@ -9,6 +9,7 @@
 #include "runtime/toolexecutionlayer.h"
 
 #include "../chat/conversationclient.h"
+#include "../qtllm_global.h"
 
 #include <QJsonArray>
 #include <QObject>
@@ -24,7 +25,7 @@ class McpServerRegistry;
 
 namespace qtllm::tools {
 
-class ToolEnabledChatEntry : public QObject
+class QTLLM_CONVERSATION_EXPORT ToolEnabledChatEntry : public QObject
 {
     Q_OBJECT
 public:

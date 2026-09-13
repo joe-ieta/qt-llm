@@ -1,12 +1,14 @@
 #pragma once
 
+#include "../qtllm_global.h"
+
 #include "ilogsink.h"
 
 #include <QObject>
 
 namespace qtllm::logging {
 
-class SignalLogSink : public QObject, public ILogSink
+class QTLLM_DIAGNOSTICS_EXPORT SignalLogSink : public QObject, public ILogSink
 {
     Q_OBJECT
 public:

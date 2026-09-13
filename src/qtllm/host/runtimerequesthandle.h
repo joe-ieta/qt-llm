@@ -1,6 +1,7 @@
 #pragma once
 
 #include "runtimeprofile.h"
+#include "../qtllm_global.h"
 
 #include <QObject>
 #include <memory>
@@ -15,7 +16,7 @@ class ManagedLlamaCppRuntimeService;
 
 namespace qtllm::host {
 
-class RuntimeRequestHandle final : public QObject
+class QTLLM_CONVERSATION_EXPORT RuntimeRequestHandle final : public QObject
 {
     Q_OBJECT
 public:

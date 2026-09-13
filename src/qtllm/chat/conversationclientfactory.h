@@ -1,6 +1,7 @@
 #pragma once
 
 #include "conversationclient.h"
+#include "../qtllm_global.h"
 
 #include <QHash>
 #include <QObject>
@@ -14,7 +15,7 @@ class ConversationRepository;
 
 namespace qtllm::chat {
 
-class ConversationClientFactory : public QObject
+class QTLLM_CONVERSATION_EXPORT ConversationClientFactory : public QObject
 {
     Q_OBJECT
 public:

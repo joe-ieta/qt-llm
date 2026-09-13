@@ -2,6 +2,7 @@
 
 #include "modelcatalogservice.h"
 #include "runtimeprofile.h"
+#include "../qtllm_global.h"
 
 #include <QObject>
 #include <memory>
@@ -18,7 +19,7 @@ namespace qtllm::host {
 
 class RuntimeRequestHandle;
 
-class RuntimeFacade : public QObject
+class QTLLM_CONVERSATION_EXPORT RuntimeFacade : public QObject
 {
     Q_OBJECT
 public:

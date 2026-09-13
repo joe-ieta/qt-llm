@@ -204,3 +204,17 @@ set_target_properties(qtllm PROPERTIES
     OUTPUT_NAME qtllm
     WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
+
+if(QTLLM_LIBRARY_TYPE STREQUAL "STATIC")
+    foreach(_qtllm_static_target
+            qtllm_core qtllm_diagnostics qtllm_tools
+            qtllm_local_runtime qtllm_conversation qtllm)
+        target_compile_definitions(${_qtllm_static_target} PUBLIC QTLLM_STATIC)
+    endforeach()
+else()
+    target_compile_definitions(qtllm_core PRIVATE QTLLM_CORE_LIBRARY)
+    target_compile_definitions(qtllm_diagnostics PRIVATE QTLLM_DIAGNOSTICS_LIBRARY)
+    target_compile_definitions(qtllm_tools PRIVATE QTLLM_TOOLS_LIBRARY)
+    target_compile_definitions(qtllm_local_runtime PRIVATE QTLLM_LOCAL_RUNTIME_LIBRARY)
+    target_compile_definitions(qtllm_conversation PRIVATE QTLLM_CONVERSATION_LIBRARY)
+endif()

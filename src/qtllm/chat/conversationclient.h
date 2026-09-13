@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "conversationsnapshot.h"
+#include "../qtllm_global.h"
 #include "../context/contextwindowservice.h"
 
 #include <QJsonArray>
@@ -19,7 +20,7 @@ class ToolCallOrchestrator;
 
 namespace chat {
 
-class ConversationClient : public QObject
+class QTLLM_CONVERSATION_EXPORT ConversationClient : public QObject
 {
     Q_OBJECT
 public:

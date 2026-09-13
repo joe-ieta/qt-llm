@@ -1,0 +1,37 @@
+#pragma once
+
+#include <QtCore/qglobal.h>
+
+#if defined(QTLLM_STATIC)
+#  define QTLLM_CORE_EXPORT
+#  define QTLLM_DIAGNOSTICS_EXPORT
+#  define QTLLM_TOOLS_EXPORT
+#  define QTLLM_LOCAL_RUNTIME_EXPORT
+#  define QTLLM_CONVERSATION_EXPORT
+#else
+#  if defined(QTLLM_CORE_LIBRARY)
+#    define QTLLM_CORE_EXPORT Q_DECL_EXPORT
+#  else
+#    define QTLLM_CORE_EXPORT Q_DECL_IMPORT
+#  endif
+#  if defined(QTLLM_DIAGNOSTICS_LIBRARY)
+#    define QTLLM_DIAGNOSTICS_EXPORT Q_DECL_EXPORT
+#  else
+#    define QTLLM_DIAGNOSTICS_EXPORT Q_DECL_IMPORT
+#  endif
+#  if defined(QTLLM_TOOLS_LIBRARY)
+#    define QTLLM_TOOLS_EXPORT Q_DECL_EXPORT
+#  else
+#    define QTLLM_TOOLS_EXPORT Q_DECL_IMPORT
+#  endif
+#  if defined(QTLLM_LOCAL_RUNTIME_LIBRARY)
+#    define QTLLM_LOCAL_RUNTIME_EXPORT Q_DECL_EXPORT
+#  else
+#    define QTLLM_LOCAL_RUNTIME_EXPORT Q_DECL_IMPORT
+#  endif
+#  if defined(QTLLM_CONVERSATION_LIBRARY)
+#    define QTLLM_CONVERSATION_EXPORT Q_DECL_EXPORT
+#  else
+#    define QTLLM_CONVERSATION_EXPORT Q_DECL_IMPORT
+#  endif
+#endif

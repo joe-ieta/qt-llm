@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../qtllm_global.h"
+
 #include "../core/llmconfig.h"
 
 #include <QList>
@@ -41,7 +43,7 @@ struct LlamaCppLocalModel
     QString displayName;
 };
 
-class ManagedLlamaCppRuntime : public QObject
+class QTLLM_LOCAL_RUNTIME_EXPORT ManagedLlamaCppRuntime : public QObject
 {
     Q_OBJECT
 public:

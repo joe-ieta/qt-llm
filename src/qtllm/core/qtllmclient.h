@@ -2,6 +2,7 @@
 
 #include "llmconfig.h"
 #include "llmtypes.h"
+#include "../qtllm_global.h"
 
 #include <QObject>
 #include <memory>
@@ -21,7 +22,7 @@ namespace tools::runtime {
 class ToolCallOrchestrator;
 }
 
-class QtLLMClient : public QObject
+class QTLLM_CONVERSATION_EXPORT QtLLMClient : public QObject
 {
     Q_OBJECT
 public:

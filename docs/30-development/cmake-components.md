@@ -68,3 +68,36 @@ Windows 共享构建使用 CMake 的自动符号导出；其他平台沿用编�
 - 会话组件保持存储可选，不把 Qt Sql 带入无存储模式。
 - 工具/MCP、本地运行时和诊断分别形成单向依赖，不允许回指聚合目标。
 - `QtLlm::QtLlm` 始终作为兼容入口，组件拆分不得改变其公开行为。
+
+## STATIC/SHARED 与 Qt5/Qt6 支持
+
+公开组件支持 Qt 5.15.2、Qt 6.10.3，以及静态库和共享库两种构建模式。下游工程继续通过安装后的 CMake 包使用目标，不应直接依赖构建目录中的库文件。
+
+```cmake
+find_package(QtLlm CONFIG REQUIRED COMPONENTS Diagnostics Tools LocalRuntime Conversation)
+
+target_link_libraries(my_application
+    PRIVATE
+    QtLlm::Diagnostics
+    QtLlm::Tools
+    QtLlm::LocalRuntime
+    QtLlm::Conversation
+)
+```
+
+兼容既有工程时仍可使用聚合目标：
+
+```cmake
+find_package(QtLlm CONFIG REQUIRED)
+target_link_libraries(my_application PRIVATE QtLlm::QtLlm)
+```
+
+构建约束如下：
+
+- 静态构建通过目标使用要求自动向下游传递 `QTLLM_STATIC`。
+- 共享库构建由各组件内部定义对应的导出宏，下游不得手工定义 `QTLLM_*_LIBRARY`。
+- QObject 派生公开类使用所属组件导出声明，保证 `staticMetaObject`、虚表和信号槽边界可跨 Windows DLL 使用。
+- 聚合目标只负责兼容链接与传递依赖，不改变组件职责或公开接口。
+- Windows 当前保留 `WINDOWS_EXPORT_ALL_SYMBOLS` 兼容尚未显式标注的公开符号；它与 QObject 显式导出并存时可能产生 LNK4197 警告，该警告不影响已经验证的链接和运行结果。
+
+QTL-09 验证矩阵覆盖 Qt5/Qt6、STATIC/SHARED 源码测试，以及安装包的组件式、Conversation 和聚合目标下游工程。所有组合均已完成配置、构建和实际运行。

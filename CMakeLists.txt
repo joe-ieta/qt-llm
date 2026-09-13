@@ -151,6 +151,9 @@ if(QTLLM_ENABLE_INSTALL)
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
         INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     )
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/qtllm/qtllm_global.h"
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    )
     foreach(_qtllm_public_header_dir
             chat context core events host identity logging network profile providers runtime
             storage streaming structuredoutput tools toolsinside toolsstudio)

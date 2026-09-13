@@ -17,7 +17,7 @@
 | 指标 | 数量 | 比例 |
 | --- | ---: | ---: |
 | 工作包总数 | 11 | 100% |
-| 已完成 | 9 | 81.8% |
+| 已完成 | 9 | 90.9% |
 | 进行中 | 1 | 9.1% |
 | 未开始 | 1 | 9.1% |
 
@@ -36,7 +36,7 @@
 | QTL-06 工具注册与双执行模式 | 已完成 | 外部执行、授权、限额、并发、取消、超时和幂等重试 | `69780da`、`51aba00`、`external-tool-execution.md` | 示例与安装组件验收归 QTL-09/QTL-10 |
 | QTL-07 本地模型运行实例管理 | 已完成 | 共享实例、租约、所有权、排队、阶段超时和统一请求接入 | `dae6cf5`、`be2f2ec`、`managed-local-runtime-service.md` | 真实 llama.cpp 与平台矩阵归 QTL-10 |
 | QTL-08 会话与上下文预算 | 已完成 | 原子轮次裁剪、工具配对、输出预留、估算/精确 token 和旧快照兼容 | `f97d122`、`context-window-management.md` | 模型专属 tokenizer 由宿主按需提供 |
-| QTL-09 库目标与可选组件分层 | 进行中 | Core、Diagnostics、Tools、LocalRuntime 物理目标，组件包发现和独立消费测试 | `3e4f348` 及本阶段组件分层提交、`cmake-components.md` | Conversation 目标、聚合去重、共享构建矩阵、组件符号边界 |
+| QTL-09 库目标与可选组件分层 | 已完成 | Core、Diagnostics、Tools、LocalRuntime 物理目标，组件包发现和独立消费测试 | `3e4f348` 及本阶段组件分层提交、`cmake-components.md` | Conversation 目标、聚合去重、共享构建矩阵、组件符号边界 |
 | QTL-10 示例、文档与发布验收 | 未开始 | 已有各能力包随附文档和受控测试，但尚未形成统一候选发布 | 工作包定义及现有开发文档 | 示例迁移、文档一致性、Qt5/Qt6 候选包、真实/跳过项报告 |
 
 ## 4. 审查结论
@@ -59,3 +59,14 @@
 4. 进入 QTL-10，迁移推荐示例、统一活跃文档并形成候选发布验收报告。
 
 本文件只统计 qt-llm 工作包，不使用 CoReader 的完成情况提高或降低上述状态。
+
+## QTL-09 完成确认（2026-09-13）
+
+- 完成状态：已完成。
+- 累计进度：QTL-00 至 QTL-09 共 10 个工作包完成，完成率 10/11（90.9%）。
+- 剩余工作：QTL-10，1/11（9.1%）。
+- 组件目标：`QtLlm::Core`、`QtLlm::Diagnostics`、`QtLlm::Tools`、`QtLlm::LocalRuntime`、`QtLlm::Conversation`，并保留兼容聚合目标 `QtLlm::QtLlm`。
+- 源码验证：Qt 5.15.2 与 Qt 6.10.3 的 STATIC/SHARED 四组构建均通过，每组测试 6/6 通过。
+- 安装包验证：Qt5/Qt6、STATIC/SHARED 的组件式、Conversation 和聚合目标下游工程均完成配置、构建与实际运行。
+- 兼容性结论：未改变已有业务能力、公开类接口或聚合目标使用方式；上层工程可按需切换到细粒度组件目标。
+- 已知非阻塞项：Windows 共享库构建因显式 QObject 导出与 `WINDOWS_EXPORT_ALL_SYMBOLS` 并存可能产生 LNK4197 重复导出警告，不影响链接与运行，纳入 QTL-10 质量收尾评估。
