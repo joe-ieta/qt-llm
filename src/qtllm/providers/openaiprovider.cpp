@@ -1,5 +1,7 @@
 #include "openaiprovider.h"
 
+#include "../structuredoutput/structuredoutputservice.h"
+
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -707,8 +709,10 @@ QByteArray OpenAIProvider::buildPayload(const LlmRequest &request) const
     root.insert(QStringLiteral("stream"), request.stream);
     root.insert(QStringLiteral("store"), false);
 
+    const QVector<LlmMessage> messages =
+        StructuredOutputService::constrainedMessages(request.messages, request.output);
     QString instructions;
-    const QJsonArray input = toResponseInput(request.messages, &instructions);
+    const QJsonArray input = toResponseInput(messages, &instructions);
     root.insert(QStringLiteral("input"), input);
     if (!instructions.trimmed().isEmpty()) {
         root.insert(QStringLiteral("instructions"), instructions);
@@ -717,6 +721,11 @@ QByteArray OpenAIProvider::buildPayload(const LlmRequest &request) const
     const QJsonArray tools = toResponseTools(request.tools);
     if (!tools.isEmpty()) {
         root.insert(QStringLiteral("tools"), tools);
+    }
+
+    const QJsonObject text = StructuredOutputService::openAiResponsesText(request.output);
+    if (!text.isEmpty()) {
+        root.insert(QStringLiteral("text"), text);
     }
 
     return QJsonDocument(root).toJson(QJsonDocument::Compact);

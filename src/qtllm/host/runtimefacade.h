@@ -22,6 +22,7 @@ public:
 
     void setProfile(const RuntimeProfile &profile);
     RuntimeProfile profile() const;
+    ModelCapabilitySnapshot modelCapabilities() const;
 
     QList<LocalModelInfo> listLocalModels(QString *errorMessage = nullptr) const;
     bool refreshRuntimeAvailability(QString *message = nullptr);

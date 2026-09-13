@@ -58,6 +58,9 @@ struct RuntimeProfile
     int resolvedLlamaCppGpuLayers = -1;
     int resolvedLlamaCppThreadCount = 0;
     int resolvedLlamaCppContextSize = 0;
+
+    // Optional model-specific evidence. Unknown remains the default.
+    ModelCapabilityOverrides modelCapabilities;
 };
 
 struct ChatRequest
@@ -74,6 +77,7 @@ struct ChatRequest
     QVector<qtllm::LlmMessage> messages;
     QJsonArray tools;
     QString model;
+    OutputConstraint output;
 };
 
 struct ChatResult

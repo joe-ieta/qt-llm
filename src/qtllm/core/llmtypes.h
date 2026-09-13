@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../structuredoutput/structuredoutputtypes.h"
+
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QMetaType>
@@ -38,6 +40,9 @@ struct LlmRequest
 
     // Optional caller-supplied logical request ID.
     QString requestId;
+
+    // Optional structured-output contract. Text preserves legacy behavior.
+    OutputConstraint output;
 };
 
 enum class LlmErrorCategory
@@ -48,7 +53,9 @@ enum class LlmErrorCategory
     Transport,
     Protocol,
     Tool,
-    Canceled
+    Canceled,
+    Parsing,
+    Schema
 };
 
 struct LlmError
@@ -76,6 +83,7 @@ struct LlmResponse
     QString requestId;
     bool canceled = false;
     LlmError error;
+    StructuredOutputResult structuredOutput;
 };
 
 struct LlmStreamDelta

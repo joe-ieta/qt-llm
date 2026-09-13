@@ -52,6 +52,10 @@ private slots:
     void llmEventDispatcherFansOutAndDetachesSinks();
     void runtimeProfileMapperUsesStructuredMessages();
     void runtimeFacadeParallelHandlesKeepRequestAttribution();
+    void structuredOutputValidatesJsonAndSchema();
+    void structuredOutputSeparatesSyntaxAndSchemaFailures();
+    void modelCapabilitiesKeepUnknownModelEvidence();
+    void providersMapNativeStructuredOutput();
     void streamChunkParserHandlesFragmentedInput();
     void streamChunkParserTakePendingLine();
 };

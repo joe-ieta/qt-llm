@@ -1,5 +1,7 @@
 #include "openaicompatibleprovider.h"
 
+#include "../structuredoutput/structuredoutputservice.h"
+
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -878,13 +880,15 @@ QByteArray OpenAICompatibleProvider::buildPayload(const LlmRequest &request) con
     const QString model = request.model.trimmed().isEmpty() ? m_config.model : request.model;
 
     QJsonObject root;
+    const QVector<LlmMessage> messages =
+        StructuredOutputService::constrainedMessages(request.messages, request.output);
 
     if (schema == VendorSchema::Anthropic) {
         root.insert(QStringLiteral("model"), model);
         root.insert(QStringLiteral("stream"), request.stream);
 
         QString systemPrompt;
-        root.insert(QStringLiteral("messages"), toAnthropicMessages(request.messages, &systemPrompt));
+        root.insert(QStringLiteral("messages"), toAnthropicMessages(messages, &systemPrompt));
         if (!systemPrompt.trimmed().isEmpty()) {
             root.insert(QStringLiteral("system"), systemPrompt);
         }
@@ -899,7 +903,7 @@ QByteArray OpenAICompatibleProvider::buildPayload(const LlmRequest &request) con
 
     if (schema == VendorSchema::Google) {
         QString systemPrompt;
-        root.insert(QStringLiteral("contents"), toGoogleContents(request.messages, &systemPrompt));
+        root.insert(QStringLiteral("contents"), toGoogleContents(messages, &systemPrompt));
 
         if (!systemPrompt.trimmed().isEmpty()) {
             QJsonObject systemInstruction;
@@ -916,14 +920,26 @@ QByteArray OpenAICompatibleProvider::buildPayload(const LlmRequest &request) con
             root.insert(QStringLiteral("tools"), tools);
         }
 
+        const QJsonObject generationConfig =
+            StructuredOutputService::googleGenerationConfig(request.output);
+        if (!generationConfig.isEmpty()) {
+            root.insert(QStringLiteral("generationConfig"), generationConfig);
+        }
+
         return QJsonDocument(root).toJson(QJsonDocument::Compact);
     }
 
     root.insert(QStringLiteral("model"), model);
     root.insert(QStringLiteral("stream"), request.stream);
-    root.insert(QStringLiteral("messages"), toOpenAiMessages(request.messages));
+    root.insert(QStringLiteral("messages"), toOpenAiMessages(messages));
     if (!request.tools.isEmpty()) {
         root.insert(QStringLiteral("tools"), request.tools);
+    }
+
+    const QJsonObject responseFormat =
+        StructuredOutputService::openAiChatResponseFormat(request.output);
+    if (!responseFormat.isEmpty()) {
+        root.insert(QStringLiteral("response_format"), responseFormat);
     }
 
     return QJsonDocument(root).toJson(QJsonDocument::Compact);

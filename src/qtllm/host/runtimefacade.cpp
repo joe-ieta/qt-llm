@@ -1,6 +1,7 @@
 #include "runtimefacade.h"
 
 #include "runtimerequesthandle.h"
+#include "../structuredoutput/structuredoutputservice.h"
 
 #include "runtimeprofilemapper.h"
 #include "../core/qtllmclient.h"
@@ -85,6 +86,15 @@ void RuntimeFacade::setProfile(const RuntimeProfile &profile)
 RuntimeProfile RuntimeFacade::profile() const
 {
     return m_profile;
+}
+
+ModelCapabilitySnapshot RuntimeFacade::modelCapabilities() const
+{
+    return StructuredOutputService::capabilities(
+        m_profile.providerName,
+        m_profile.model,
+        m_profile.modelVendor,
+        m_profile.modelCapabilities);
 }
 
 QList<LocalModelInfo> RuntimeFacade::listLocalModels(QString *errorMessage) const

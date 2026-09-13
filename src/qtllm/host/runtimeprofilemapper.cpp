@@ -86,6 +86,7 @@ LlmRequest RuntimeProfileMapper::toRequest(const RuntimeProfile &profile, const 
     llmRequest.model = request.model.trimmed().isEmpty() ? profile.model.trimmed() : request.model.trimmed();
     llmRequest.stream = profile.stream;
     llmRequest.tools = request.tools;
+    llmRequest.output = request.output;
     if (!request.messages.isEmpty()) {
         llmRequest.messages = request.messages;
         return llmRequest;

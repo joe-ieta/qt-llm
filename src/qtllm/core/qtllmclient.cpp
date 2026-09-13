@@ -1,5 +1,7 @@
 #include "qtllmclient.h"
 
+#include "../structuredoutput/structuredoutputservice.h"
+
 #include "../identity/compactid.h"
 #include "../events/llmeventdispatcher.h"
 #include "../logging/qtllmlogger.h"
@@ -141,6 +143,40 @@ void QtLLMClient::sendRequest(const LlmRequest &request)
             response.error.category = LlmErrorCategory::Configuration;
             response.error.code = QStringLiteral("provider_not_configured");
             response.error.message = message;
+            finishRequest(response);
+            return;
+        }
+    }
+
+    QString constraintCode;
+    QString constraintMessage;
+    if (!StructuredOutputService::validateConstraint(
+            request.output, &constraintCode, &constraintMessage)) {
+        LlmResponse response;
+        response.errorMessage = constraintMessage;
+        response.error.category = LlmErrorCategory::Configuration;
+        response.error.code = constraintCode;
+        response.error.message = constraintMessage;
+        finishRequest(response);
+        return;
+    }
+
+    if (request.output.format != StructuredOutputFormat::Text
+        && request.output.mode == OutputConstraintMode::Native) {
+        const QString model = request.model.trimmed().isEmpty() ? m_config.model : request.model;
+        const ModelCapabilitySnapshot snapshot = StructuredOutputService::capabilities(
+            m_provider->name(), model, m_config.modelVendor);
+        const CapabilityDescriptor capability =
+            request.output.format == StructuredOutputFormat::JsonSchema
+                ? snapshot.jsonSchemaOutput
+                : snapshot.jsonOutput;
+        if (capability.adapterSupport == CapabilitySupport::Unsupported) {
+            LlmResponse response;
+            response.errorMessage = QStringLiteral(
+                "Native structured output is unsupported by the provider adapter");
+            response.error.category = LlmErrorCategory::Configuration;
+            response.error.code = QStringLiteral("structured_output_unsupported");
+            response.error.message = response.errorMessage;
             finishRequest(response);
             return;
         }
@@ -457,13 +493,36 @@ void QtLLMClient::wireExecutor()
             }
         }
 
+        response.text = finalText;
+        response.structuredOutput = StructuredOutputService::validate(
+            finalText, m_activeRequest.output);
+        if (response.structuredOutput.requested
+            && (!response.structuredOutput.syntaxValid
+                || !response.structuredOutput.schemaValid)) {
+            response.success = false;
+            response.errorMessage = response.structuredOutput.errorMessage;
+            response.error.category = response.structuredOutput.syntaxValid
+                ? LlmErrorCategory::Schema
+                : LlmErrorCategory::Parsing;
+            response.error.code = response.structuredOutput.errorCode;
+            response.error.message = response.structuredOutput.errorMessage;
+            events::LlmEventDispatcher::instance().recordTraceError(
+                m_toolLoopClientId,
+                m_toolLoopSessionId,
+                m_toolLoopTraceId,
+                m_activeRequestId,
+                response.errorMessage,
+                QStringLiteral("llm.structured_output"));
+            finishRequest(response);
+            return;
+        }
+
         events::LlmEventDispatcher::instance().recordTraceCompleted(m_toolLoopClientId,
                                                                                       m_toolLoopSessionId,
                                                                                       m_toolLoopTraceId,
                                                                                       m_activeRequestId,
                                                                                       finalText,
                                                                                       response.finishReason);
-        response.text = finalText;
         finishRequest(response);
     });
 

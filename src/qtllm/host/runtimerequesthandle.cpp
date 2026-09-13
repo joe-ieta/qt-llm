@@ -4,6 +4,7 @@
 #include "../core/qtllmclient.h"
 #include "../events/llmeventdispatcher.h"
 #include "../identity/compactid.h"
+#include "../structuredoutput/structuredoutputservice.h"
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -139,6 +140,38 @@ void RuntimeRequestHandle::start()
                         QStringLiteral("missing_provider"),
                         QStringLiteral("RuntimeProfile.providerName is empty"));
         return;
+    }
+
+    QString constraintCode;
+    QString constraintMessage;
+    if (!StructuredOutputService::validateConstraint(
+            m_request.output, &constraintCode, &constraintMessage)) {
+        finishWithError(LlmErrorCategory::Configuration,
+                        constraintCode,
+                        constraintMessage);
+        return;
+    }
+
+    if (m_request.output.format != StructuredOutputFormat::Text
+        && m_request.output.mode == OutputConstraintMode::Native) {
+        const QString model = m_request.model.trimmed().isEmpty()
+            ? m_profile.model
+            : m_request.model.trimmed();
+        const ModelCapabilitySnapshot snapshot = StructuredOutputService::capabilities(
+            m_profile.providerName,
+            model,
+            m_profile.modelVendor,
+            m_profile.modelCapabilities);
+        const CapabilityDescriptor capability =
+            m_request.output.format == StructuredOutputFormat::JsonSchema
+                ? snapshot.jsonSchemaOutput
+                : snapshot.jsonOutput;
+        if (capability.effectiveSupport() == CapabilitySupport::Unsupported) {
+            finishWithError(LlmErrorCategory::Configuration,
+                            QStringLiteral("structured_output_unsupported"),
+                            QStringLiteral("Native structured output is unsupported by the adapter or model configuration"));
+            return;
+        }
     }
 
     m_client->setConfig(RuntimeProfileMapper::toConfig(m_profile));

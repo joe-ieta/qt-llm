@@ -36,6 +36,7 @@
 #include "../../src/qtllm/runtime/managedllamacppruntime.h"
 #include "../../src/qtllm/storage/conversationrepository.h"
 #include "../../src/qtllm/streaming/streamchunkparser.h"
+#include "../../src/qtllm/structuredoutput/structuredoutputservice.h"
 #include "../../src/qtllm/tools/llmtoolregistry.h"
 #include "../../src/qtllm/tools/mcp/imcpclient.h"
 #include "../../src/qtllm/tools/mcp/mcpserverregistry.h"
@@ -1522,6 +1523,168 @@ void QtLlmCoreTests::runtimeFacadeParallelHandlesKeepRequestAttribution()
     QVERIFY(firstResult.requestId != secondResult.requestId);
     QCOMPARE(firstResult.text, QStringLiteral("ok"));
     QCOMPARE(secondResult.text, QStringLiteral("ok"));
+}
+
+void QtLlmCoreTests::structuredOutputValidatesJsonAndSchema()
+{
+    OutputConstraint constraint;
+    constraint.format = StructuredOutputFormat::JsonSchema;
+    constraint.schemaName = QStringLiteral("summary");
+    constraint.schema = QJsonObject{
+        {QStringLiteral("type"), QStringLiteral("object")},
+        {QStringLiteral("properties"),
+         QJsonObject{
+             {QStringLiteral("name"),
+              QJsonObject{{QStringLiteral("type"), QStringLiteral("string")}}},
+             {QStringLiteral("count"),
+              QJsonObject{{QStringLiteral("type"), QStringLiteral("integer")}}}}},
+        {QStringLiteral("required"), QJsonArray{QStringLiteral("name")}},
+        {QStringLiteral("additionalProperties"), false}
+    };
+
+    const StructuredOutputResult result =
+        StructuredOutputService::validate(QStringLiteral(R"({"name":"qt-llm","count":2})"),
+                                          constraint);
+    QVERIFY(result.requested);
+    QVERIFY(result.syntaxValid);
+    QVERIFY(result.schemaValid);
+    QCOMPARE(result.value.toObject().value(QStringLiteral("name")).toString(),
+             QStringLiteral("qt-llm"));
+
+    constraint.mode = OutputConstraintMode::Prompt;
+    QVector<LlmMessage> messages;
+    messages.append({QStringLiteral("user"), QStringLiteral("answer")});
+    const QVector<LlmMessage> constrained =
+        StructuredOutputService::constrainedMessages(messages, constraint);
+    QCOMPARE(constrained.size(), 2);
+    QCOMPARE(constrained.first().role, QStringLiteral("system"));
+}
+
+void QtLlmCoreTests::structuredOutputSeparatesSyntaxAndSchemaFailures()
+{
+    OutputConstraint jsonConstraint;
+    jsonConstraint.format = StructuredOutputFormat::Json;
+    const StructuredOutputResult syntaxFailure =
+        StructuredOutputService::validate(QStringLiteral("not-json"), jsonConstraint);
+    QVERIFY(!syntaxFailure.syntaxValid);
+    QCOMPARE(syntaxFailure.errorCode, QStringLiteral("structured_output_invalid_json"));
+
+    OutputConstraint schemaConstraint;
+    schemaConstraint.format = StructuredOutputFormat::JsonSchema;
+    schemaConstraint.schema = QJsonObject{
+        {QStringLiteral("type"), QStringLiteral("object")},
+        {QStringLiteral("properties"),
+         QJsonObject{{QStringLiteral("count"),
+                      QJsonObject{{QStringLiteral("type"), QStringLiteral("integer")}}}}},
+        {QStringLiteral("required"), QJsonArray{QStringLiteral("count")}}};
+    const StructuredOutputResult schemaFailure =
+        StructuredOutputService::validate(QStringLiteral(R"({"count":"two"})"),
+                                          schemaConstraint);
+    QVERIFY(schemaFailure.syntaxValid);
+    QVERIFY(!schemaFailure.schemaValid);
+    QCOMPARE(schemaFailure.errorCode,
+             QStringLiteral("structured_output_schema_mismatch"));
+    QVERIFY(!schemaFailure.violations.isEmpty());
+
+    schemaConstraint.schema.insert(
+        QStringLiteral("oneOf"),
+        QJsonArray{QJsonObject{{QStringLiteral("type"), QStringLiteral("object")}}});
+    QString errorCode;
+    QString errorMessage;
+    QVERIFY(!StructuredOutputService::validateConstraint(
+        schemaConstraint, &errorCode, &errorMessage));
+    QCOMPARE(errorCode, QStringLiteral("structured_output_schema_unsupported"));
+    QVERIFY(errorMessage.contains(QStringLiteral("oneOf")));
+}
+
+void QtLlmCoreTests::modelCapabilitiesKeepUnknownModelEvidence()
+{
+    const ModelCapabilitySnapshot unknownModel =
+        StructuredOutputService::capabilities(
+            QStringLiteral("openai"), QStringLiteral("unverified-model"));
+    QCOMPARE(unknownModel.jsonSchemaOutput.adapterSupport,
+             CapabilitySupport::Supported);
+    QCOMPARE(unknownModel.jsonSchemaOutput.modelSupport,
+             CapabilitySupport::Unknown);
+    QCOMPARE(unknownModel.jsonSchemaOutput.effectiveSupport(),
+             CapabilitySupport::Unknown);
+
+    ModelCapabilityOverrides overrides;
+    overrides.jsonSchemaOutput.support = CapabilitySupport::Supported;
+    overrides.jsonSchemaOutput.source = CapabilitySource::ModelConfiguration;
+    const ModelCapabilitySnapshot configured =
+        StructuredOutputService::capabilities(
+            QStringLiteral("openai"),
+            QStringLiteral("configured-model"),
+            QString(),
+            overrides);
+    QCOMPARE(configured.jsonSchemaOutput.effectiveSupport(),
+             CapabilitySupport::Supported);
+    QCOMPARE(configured.jsonSchemaOutput.modelSource,
+             CapabilitySource::ModelConfiguration);
+
+    const ModelCapabilitySnapshot anthropic =
+        StructuredOutputService::capabilities(
+            QStringLiteral("openai-compatible"),
+            QStringLiteral("claude-test"),
+            QStringLiteral("anthropic"));
+    QCOMPARE(anthropic.jsonSchemaOutput.adapterSupport,
+             CapabilitySupport::Unsupported);
+    QCOMPARE(anthropic.jsonSchemaOutput.effectiveSupport(),
+             CapabilitySupport::Unsupported);
+}
+
+void QtLlmCoreTests::providersMapNativeStructuredOutput()
+{
+    OutputConstraint constraint;
+    constraint.format = StructuredOutputFormat::JsonSchema;
+    constraint.schemaName = QStringLiteral("result");
+    constraint.schema = QJsonObject{
+        {QStringLiteral("type"), QStringLiteral("object")},
+        {QStringLiteral("properties"),
+         QJsonObject{{QStringLiteral("value"),
+                      QJsonObject{{QStringLiteral("type"), QStringLiteral("string")}}}}}};
+
+    LlmRequest request;
+    request.model = QStringLiteral("test-model");
+    request.stream = false;
+    request.messages.append({QStringLiteral("user"), QStringLiteral("answer")});
+    request.output = constraint;
+
+    LlmConfig config;
+    config.model = request.model;
+
+    OpenAIProvider openAi;
+    openAi.setConfig(config);
+    const QJsonObject responsesPayload =
+        QJsonDocument::fromJson(openAi.buildPayload(request)).object();
+    const QJsonObject responsesFormat =
+        responsesPayload.value(QStringLiteral("text")).toObject()
+            .value(QStringLiteral("format")).toObject();
+    QCOMPARE(responsesFormat.value(QStringLiteral("type")).toString(),
+             QStringLiteral("json_schema"));
+    QCOMPARE(responsesFormat.value(QStringLiteral("name")).toString(),
+             QStringLiteral("result"));
+
+    OpenAICompatibleProvider compatible;
+    config.modelVendor = QStringLiteral("openai");
+    compatible.setConfig(config);
+    const QJsonObject chatPayload =
+        QJsonDocument::fromJson(compatible.buildPayload(request)).object();
+    QCOMPARE(chatPayload.value(QStringLiteral("response_format")).toObject()
+                 .value(QStringLiteral("type")).toString(),
+             QStringLiteral("json_schema"));
+
+    config.modelVendor = QStringLiteral("google");
+    compatible.setConfig(config);
+    const QJsonObject googlePayload =
+        QJsonDocument::fromJson(compatible.buildPayload(request)).object();
+    const QJsonObject generationConfig =
+        googlePayload.value(QStringLiteral("generationConfig")).toObject();
+    QCOMPARE(generationConfig.value(QStringLiteral("responseMimeType")).toString(),
+             QStringLiteral("application/json"));
+    QCOMPARE(generationConfig.value(QStringLiteral("responseSchema")).toObject(),
+             constraint.schema);
 }
 
 int main(int argc, char *argv[])
