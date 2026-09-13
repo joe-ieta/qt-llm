@@ -2,7 +2,7 @@
 
 - 文档版本：1.0
 - 编制日期：2026-09-13
-- 状态：任务规划，尚未实施
+- 状态：实施中；QTL-00 已于 2026-09-13 完成
 - 上位方案：[qt-llm 通用 LLM 基础能力优化方案](./llm-foundation-optimization-plan.md)
 - 适用仓库：E:\CodexDev\qt-llm
 
@@ -37,6 +37,8 @@
 ## 3. 详细工作包
 
 ### QTL-00 公共契约与兼容基线
+
+状态：已完成。交付物见 [qt-llm 公共契约与兼容基线](qtllm-public-contract-baseline.md)。
 
 目标：在实现改造前冻结可观察基线，确定必须保留的接口和行为。
 
