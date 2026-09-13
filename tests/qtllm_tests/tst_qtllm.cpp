@@ -765,7 +765,7 @@ void QtLlmCoreTests::managedLlamaCppRuntimeReusesExistingServerPort()
     QTcpServer existingServer;
     QVERIFY(existingServer.listen(QHostAddress::LocalHost, 0));
     const int port = existingServer.serverPort();
-    QObject::connect(&existingServer, &QTcpServer::newConnection, &existingServer, [&existingServer]() {
+    QObject::connect(&existingServer, &QTcpServer::newConnection, &existingServer, [this, &existingServer]() {
         while (existingServer.hasPendingConnections()) {
             QTcpSocket *socket = existingServer.nextPendingConnection();
             QObject::connect(socket, &QTcpSocket::readyRead, socket, [socket]() {

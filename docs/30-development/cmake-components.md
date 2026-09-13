@@ -98,6 +98,6 @@ target_link_libraries(my_application PRIVATE QtLlm::QtLlm)
 - 共享库构建由各组件内部定义对应的导出宏，下游不得手工定义 `QTLLM_*_LIBRARY`。
 - QObject 派生公开类使用所属组件导出声明，保证 `staticMetaObject`、虚表和信号槽边界可跨 Windows DLL 使用。
 - 聚合目标只负责兼容链接与传递依赖，不改变组件职责或公开接口。
-- Windows 当前保留 `WINDOWS_EXPORT_ALL_SYMBOLS` 兼容尚未显式标注的公开符号；它与 QObject 显式导出并存时可能产生 LNK4197 警告，该警告不影响已经验证的链接和运行结果。
+- Windows 继续保留 `WINDOWS_EXPORT_ALL_SYMBOLS` 兼容尚未显式标注的公开符号；QObject 显式导出造成的已知重叠仅使用 `/IGNORE:4197` 定向治理，其他编译和链接告警仍由发布门禁拦截。
 
 QTL-09 验证矩阵覆盖 Qt5/Qt6、STATIC/SHARED 源码测试，以及安装包的组件式、Conversation 和聚合目标下游工程。所有组合均已完成配置、构建和实际运行。

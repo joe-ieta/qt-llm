@@ -218,3 +218,36 @@ else()
     target_compile_definitions(qtllm_local_runtime PRIVATE QTLLM_LOCAL_RUNTIME_LIBRARY)
     target_compile_definitions(qtllm_conversation PRIVATE QTLLM_CONVERSATION_LIBRARY)
 endif()
+set(_qtllm_concrete_targets
+    qtllm_core
+    qtllm_diagnostics
+    qtllm_tools
+    qtllm_local_runtime
+    qtllm_conversation
+    qtllm
+)
+
+# Qt 5.15 still uses checked_array_iterator in public headers. Keep the suppression
+# narrowly scoped to the MSVC/Qt5 compatibility build and propagate it to
+# consumers that include those headers.
+if(MSVC AND QT_VERSION_MAJOR EQUAL 5)
+    foreach(_qtllm_target IN LISTS _qtllm_concrete_targets)
+        target_compile_definitions(
+            ${_qtllm_target}
+            PUBLIC _SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING
+        )
+    endforeach()
+endif()
+
+# Explicit QObject exports are required for meta-object symbols, while
+# WINDOWS_EXPORT_ALL_SYMBOLS remains necessary for legacy unannotated API.
+# MSVC reports their intentional overlap as LNK4197; suppress only that linker
+# diagnostic without changing the exported ABI.
+if(MSVC AND QTLLM_LIBRARY_TYPE STREQUAL "SHARED")
+    foreach(_qtllm_target IN LISTS _qtllm_concrete_targets)
+        target_link_options(${_qtllm_target} PRIVATE /IGNORE:4197)
+    endforeach()
+endif()
+
+unset(_qtllm_target)
+unset(_qtllm_concrete_targets)
