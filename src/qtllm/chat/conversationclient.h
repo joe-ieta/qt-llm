@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "conversationsnapshot.h"
+#include "../context/contextwindowservice.h"
 
 #include <QJsonArray>
 #include <QObject>
@@ -47,6 +48,10 @@ public:
     QVector<LlmMessage> history() const;
     void clearHistory();
 
+    void setMessageTokenCounter(
+        std::shared_ptr<context::IMessageTokenCounter> tokenCounter);
+    context::ContextWindowResult lastContextWindowResult() const;
+
     void sendUserMessage(const QString &content);
     void sendUserMessageWithTools(const QString &content,
                                   const QJsonArray &tools,
@@ -68,9 +73,11 @@ signals:
     void activeSessionChanged(const QString &sessionId);
     void configChanged();
     void profileChanged();
+    void contextWindowEvaluated(const qtllm::context::ContextWindowResult &result);
 
 private:
-    LlmRequest buildRequestForNextTurn(const QJsonArray &tools = QJsonArray()) const;
+    context::ContextWindowResult buildRequestForNextTurn(
+        const QJsonArray &tools, LlmRequest *request) const;
     void appendMessage(const QString &role, const QString &content);
     int findSessionIndex(const QString &sessionId) const;
     ConversationSessionSnapshot *activeSession();
@@ -84,6 +91,8 @@ private:
     QVector<ConversationSessionSnapshot> m_sessions;
     QString m_activeSessionId;
     QString m_pendingAssistantText;
+    context::ContextWindowService m_contextWindowService;
+    context::ContextWindowResult m_lastContextWindowResult;
     QtLLMClient *m_llmClient;
 };
 

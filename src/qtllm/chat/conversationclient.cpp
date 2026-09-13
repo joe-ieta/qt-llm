@@ -255,6 +255,17 @@ void ConversationClient::clearHistory()
     emit sessionsChanged();
 }
 
+void ConversationClient::setMessageTokenCounter(
+    std::shared_ptr<context::IMessageTokenCounter> tokenCounter)
+{
+    m_contextWindowService.setTokenCounter(std::move(tokenCounter));
+}
+
+context::ContextWindowResult ConversationClient::lastContextWindowResult() const
+{
+    return m_lastContextWindowResult;
+}
+
 void ConversationClient::sendUserMessage(const QString &content)
 {
     sendUserMessageWithTools(content, QJsonArray());
@@ -276,7 +287,13 @@ void ConversationClient::sendUserMessageWithTools(const QString &content,
     appendMessage(QStringLiteral("user"), trimmed);
     m_pendingAssistantText.clear();
     m_llmClient->setToolLoopContext(m_uid, m_activeSessionId, resolvedTraceId);
-    const LlmRequest request = buildRequestForNextTurn(tools);
+    LlmRequest request;
+    m_lastContextWindowResult = buildRequestForNextTurn(tools, &request);
+    emit contextWindowEvaluated(m_lastContextWindowResult);
+    if (!m_lastContextWindowResult.isSuccess()) {
+        emit errorOccurred(m_lastContextWindowResult.errorMessage);
+        return;
+    }
     const QString requestJson = requestToJsonText(request);
     emit requestPrepared(requestJson);
     events::LlmEventDispatcher::instance().recordRequestPrepared(m_uid,
@@ -311,43 +328,54 @@ void ConversationClient::restoreFromSnapshot(const ConversationSnapshot &snapsho
     emit historyChanged();
 }
 
-LlmRequest ConversationClient::buildRequestForNextTurn(const QJsonArray &tools) const
+context::ContextWindowResult ConversationClient::buildRequestForNextTurn(
+    const QJsonArray &tools, LlmRequest *request) const
 {
-    LlmRequest request;
-    request.model = m_config.model;
-    request.stream = m_config.stream;
+    request->model = m_config.model;
+    request->stream = m_config.stream;
+
+    QVector<LlmMessage> sourceMessages;
 
     if (!m_profile.systemPrompt.trimmed().isEmpty()) {
         LlmMessage system;
         system.role = QStringLiteral("system");
         system.content = m_profile.systemPrompt.trimmed();
-        request.messages.append(system);
+        sourceMessages.append(system);
     }
 
     if (!m_profile.persona.trimmed().isEmpty()) {
         LlmMessage persona;
         persona.role = QStringLiteral("system");
         persona.content = QStringLiteral("Persona: ") + m_profile.persona.trimmed();
-        request.messages.append(persona);
+        sourceMessages.append(persona);
     }
 
     if (!m_profile.thinkingStyle.trimmed().isEmpty()) {
         LlmMessage thinking;
         thinking.role = QStringLiteral("system");
         thinking.content = QStringLiteral("Thinking style: ") + m_profile.thinkingStyle.trimmed();
-        request.messages.append(thinking);
+        sourceMessages.append(thinking);
     }
 
-    request.tools = tools;
+    request->tools = tools;
 
     const QVector<LlmMessage> messages = history();
-    const int maxMessages = qMax(1, m_profile.memoryPolicy.maxHistoryMessages);
-    const int startIndex = qMax(0, messages.size() - maxMessages);
-    for (int i = startIndex; i < messages.size(); ++i) {
-        request.messages.append(messages.at(i));
+    sourceMessages += messages;
+
+    context::ContextWindowPolicy policy;
+    policy.contextWindowTokens = m_profile.memoryPolicy.contextWindowTokens;
+    policy.reservedOutputTokens = m_profile.memoryPolicy.reservedOutputTokens;
+    policy.minimumRecentTurns = m_profile.memoryPolicy.minimumRecentTurns;
+    policy.maxMessages = qMax(1, m_profile.memoryPolicy.maxHistoryMessages)
+        + (sourceMessages.size() - messages.size());
+
+    const context::ContextWindowResult result =
+        m_contextWindowService.select(sourceMessages, policy, request->model);
+    if (result.isSuccess()) {
+        request->messages = result.messages;
     }
 
-    return request;
+    return result;
 }
 
 void ConversationClient::appendMessage(const QString &role, const QString &content)

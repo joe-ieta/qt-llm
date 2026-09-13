@@ -15,6 +15,11 @@ private slots:
     void conversationClientFactoryGeneratesCompactClientIds();
     void conversationClientGeneratesCompactSessionIds();
     void conversationRepositoryPersistsCompactConversationIds();
+    void contextWindowKeepsRecentTurnsAndToolExchangeAtomic();
+    void contextWindowReservesOutputAndReportsExactCount();
+    void contextWindowRejectsOversizedRequiredContent();
+    void conversationClientAppliesContextWindowWithoutRepository();
+    void conversationSnapshotReadsLegacyHistoryWithBudgetDefaults();
     void toolStudioGeneratesCompactWorkspaceNodeAndPlacementIds();
     void toolStudioExportPackageUsesCompactPackageId();
     void providerFactoryCreatesKnownProviders();

@@ -25,6 +25,7 @@
 
 #include "../../src/qtllm/chat/conversationclient.h"
 #include "../../src/qtllm/chat/conversationclientfactory.h"
+#include "../../src/qtllm/context/contextwindowservice.h"
 #include "../../src/qtllm/core/llmconfig.h"
 #include "../../src/qtllm/core/llmtypes.h"
 #include "../../src/qtllm/events/llmeventdispatcher.h"
@@ -133,6 +134,29 @@ public:
         lastArguments = arguments;
         return callResult;
     }
+};
+
+class FixedMessageTokenCounter final : public qtllm::context::IMessageTokenCounter
+{
+public:
+    explicit FixedMessageTokenCounter(int tokensPerMessage)
+        : m_tokensPerMessage(tokensPerMessage)
+    {
+    }
+
+    qtllm::context::TokenCountResult countMessages(
+        const QVector<qtllm::LlmMessage> &messages,
+        const QString &model) const override
+    {
+        Q_UNUSED(model)
+        qtllm::context::TokenCountResult result;
+        result.tokenCount = messages.size() * m_tokensPerMessage;
+        result.accuracy = qtllm::context::TokenCountAccuracy::Exact;
+        return result;
+    }
+
+private:
+    int m_tokensPerMessage;
 };
 
 QJsonObject makeSimpleSchema()
@@ -295,6 +319,131 @@ void QtLlmCoreTests::conversationRepositoryPersistsCompactConversationIds()
     QCOMPARE(snapshot->activeSessionId, sessionId);
     QVERIFY(identity::hasIdPrefix(snapshot->uid, QStringLiteral("cli")));
     QVERIFY(identity::hasIdPrefix(snapshot->activeSessionId, QStringLiteral("ses")));
+}
+
+void QtLlmCoreTests::contextWindowKeepsRecentTurnsAndToolExchangeAtomic()
+{
+    QVector<LlmMessage> messages;
+    messages.append({QStringLiteral("system"), QStringLiteral("rules")});
+    messages.append({QStringLiteral("user"), QStringLiteral("old-user")});
+    messages.append({QStringLiteral("assistant"), QStringLiteral("old-assistant")});
+    messages.append({QStringLiteral("user"), QStringLiteral("tool-user")});
+
+    LlmMessage toolCall;
+    toolCall.role = QStringLiteral("assistant");
+    LlmToolCall call;
+    call.id = QStringLiteral("call-1");
+    call.name = QStringLiteral("lookup");
+    toolCall.toolCalls.append(call);
+    messages.append(toolCall);
+
+    LlmMessage toolResult;
+    toolResult.role = QStringLiteral("tool");
+    toolResult.content = QStringLiteral("result");
+    toolResult.toolCallId = call.id;
+    messages.append(toolResult);
+    messages.append({QStringLiteral("assistant"), QStringLiteral("tool-answer")});
+    messages.append({QStringLiteral("user"), QStringLiteral("latest-user")});
+
+    context::ContextWindowPolicy policy;
+    policy.maxMessages = 6;
+    policy.minimumRecentTurns = 1;
+
+    context::ContextWindowService service;
+    const context::ContextWindowResult result = service.select(messages, policy);
+    QVERIFY(result.isSuccess());
+    QCOMPARE(result.messages.size(), 6);
+    QCOMPARE(result.droppedMessageCount, 2);
+    QCOMPARE(result.messages.first().role, QStringLiteral("system"));
+    QCOMPARE(result.messages.at(1).content, QStringLiteral("tool-user"));
+    QCOMPARE(result.messages.at(2).toolCalls.first().id, QStringLiteral("call-1"));
+    QCOMPARE(result.messages.at(3).toolCallId, QStringLiteral("call-1"));
+    QCOMPARE(result.messages.at(4).content, QStringLiteral("tool-answer"));
+    QCOMPARE(result.messages.last().content, QStringLiteral("latest-user"));
+}
+
+void QtLlmCoreTests::contextWindowReservesOutputAndReportsExactCount()
+{
+    QVector<LlmMessage> messages;
+    messages.append({QStringLiteral("system"), QStringLiteral("rules")});
+    messages.append({QStringLiteral("user"), QStringLiteral("old")});
+    messages.append({QStringLiteral("assistant"), QStringLiteral("answer")});
+    messages.append({QStringLiteral("user"), QStringLiteral("latest")});
+
+    context::ContextWindowPolicy policy;
+    policy.contextWindowTokens = 50;
+    policy.reservedOutputTokens = 20;
+
+    context::ContextWindowService service(
+        std::make_shared<FixedMessageTokenCounter>(10));
+    const context::ContextWindowResult result = service.select(messages, policy);
+    QVERIFY(result.isSuccess());
+    QCOMPARE(result.availableInputTokens, 30);
+    QCOMPARE(result.messages.size(), 2);
+    QCOMPARE(result.inputTokenCount, 20);
+    QVERIFY(result.tokenCountAccuracy == context::TokenCountAccuracy::Exact);
+}
+
+void QtLlmCoreTests::contextWindowRejectsOversizedRequiredContent()
+{
+    QVector<LlmMessage> messages;
+    messages.append({QStringLiteral("system"), QStringLiteral("rules")});
+    messages.append({QStringLiteral("user"), QStringLiteral("latest")});
+
+    context::ContextWindowPolicy policy;
+    policy.maxMessages = 1;
+
+    context::ContextWindowService service;
+    const context::ContextWindowResult result = service.select(messages, policy);
+    QVERIFY(!result.isSuccess());
+    QVERIFY(result.status == context::ContextWindowStatus::RequiredContentTooLarge);
+    QCOMPARE(result.errorCode,
+             QStringLiteral("context_required_content_exceeds_budget"));
+}
+
+void QtLlmCoreTests::conversationClientAppliesContextWindowWithoutRepository()
+{
+    chat::ConversationClient client(QStringLiteral("cli_contextclient01"));
+    profile::ClientProfile profile;
+    profile.systemPrompt = QStringLiteral("system-rules");
+    profile.memoryPolicy.maxHistoryMessages = 1;
+    client.setProfile(profile);
+
+    QVector<LlmMessage> history;
+    history.append({QStringLiteral("user"), QStringLiteral("old-user")});
+    history.append({QStringLiteral("assistant"), QStringLiteral("old-answer")});
+    client.setHistory(history);
+
+    QSignalSpy prepared(&client, &chat::ConversationClient::requestPrepared);
+    client.sendUserMessage(QStringLiteral("latest-user"));
+    QCOMPARE(prepared.count(), 1);
+
+    const QJsonDocument request =
+        QJsonDocument::fromJson(prepared.first().first().toString().toUtf8());
+    const QJsonArray messages = request.object().value(QStringLiteral("messages")).toArray();
+    QCOMPARE(messages.size(), 2);
+    QCOMPARE(messages.first().toObject().value(QStringLiteral("role")).toString(),
+             QStringLiteral("system"));
+    QCOMPARE(messages.last().toObject().value(QStringLiteral("content")).toString(),
+             QStringLiteral("latest-user"));
+    QCOMPARE(client.lastContextWindowResult().droppedMessageCount, 2);
+}
+
+void QtLlmCoreTests::conversationSnapshotReadsLegacyHistoryWithBudgetDefaults()
+{
+    QJsonObject legacy;
+    legacy.insert(QStringLiteral("uid"), QStringLiteral("legacy-client"));
+    legacy.insert(QStringLiteral("history"),
+                  QJsonArray{QJsonObject{{QStringLiteral("role"), QStringLiteral("user")},
+                                         {QStringLiteral("content"), QStringLiteral("hello")}}});
+
+    const chat::ConversationSnapshot snapshot =
+        chat::ConversationSnapshot::fromJson(legacy);
+    QCOMPARE(snapshot.sessions.size(), 1);
+    QCOMPARE(snapshot.sessions.first().history.size(), 1);
+    QCOMPARE(snapshot.profile.memoryPolicy.contextWindowTokens, 0);
+    QCOMPARE(snapshot.profile.memoryPolicy.reservedOutputTokens, 0);
+    QCOMPARE(snapshot.profile.memoryPolicy.minimumRecentTurns, 1);
 }
 
 void QtLlmCoreTests::toolStudioGeneratesCompactWorkspaceNodeAndPlacementIds()
