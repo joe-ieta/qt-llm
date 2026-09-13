@@ -4,9 +4,14 @@
 #include "runtimeprofile.h"
 
 #include <QObject>
+#include <memory>
 
 namespace qtllm {
 class QtLLMClient;
+}
+
+namespace qtllm::runtime {
+class ManagedLlamaCppRuntimeService;
 }
 
 namespace qtllm::host {
@@ -26,6 +31,10 @@ public:
 
     QList<LocalModelInfo> listLocalModels(QString *errorMessage = nullptr) const;
     bool refreshRuntimeAvailability(QString *message = nullptr);
+    void setManagedLlamaCppRuntimeService(
+        const std::shared_ptr<runtime::ManagedLlamaCppRuntimeService> &service);
+    std::shared_ptr<runtime::ManagedLlamaCppRuntimeService>
+    managedLlamaCppRuntimeService() const;
 
     RuntimeRequestHandle *sendAsync(const ChatRequest &request);
     void send(const ChatRequest &request);
@@ -47,6 +56,7 @@ private:
 
 private:
     RuntimeProfile m_profile;
+    std::shared_ptr<runtime::ManagedLlamaCppRuntimeService> m_runtimeService;
     QtLLMClient *m_client = nullptr;
     ModelCatalogService m_modelCatalog;
     ChatRequest m_activeRequest;

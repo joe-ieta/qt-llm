@@ -35,6 +35,8 @@ LlmConfig RuntimeProfileMapper::toConfig(const RuntimeProfile &profile)
     config.llamaCppGpuLayers = profile.llamaCppGpuLayers;
     config.llamaCppThreadCount = profile.llamaCppThreadCount;
     config.llamaCppStartupTimeoutMs = profile.llamaCppStartupTimeoutMs;
+    config.llamaCppQueueTimeoutMs = profile.llamaCppQueueTimeoutMs;
+    config.llamaCppTotalTimeoutMs = profile.llamaCppTotalTimeoutMs;
     config.resolvedLlamaCppGpuLayers = profile.resolvedLlamaCppGpuLayers;
     config.resolvedLlamaCppThreadCount = profile.resolvedLlamaCppThreadCount;
     config.resolvedLlamaCppContextSize = profile.resolvedLlamaCppContextSize;
@@ -74,6 +76,8 @@ RuntimeProfile RuntimeProfileMapper::fromConfig(const LlmConfig &config)
     profile.llamaCppGpuLayers = config.llamaCppGpuLayers;
     profile.llamaCppThreadCount = config.llamaCppThreadCount;
     profile.llamaCppStartupTimeoutMs = config.llamaCppStartupTimeoutMs;
+    profile.llamaCppQueueTimeoutMs = config.llamaCppQueueTimeoutMs;
+    profile.llamaCppTotalTimeoutMs = config.llamaCppTotalTimeoutMs;
     profile.resolvedLlamaCppGpuLayers = config.resolvedLlamaCppGpuLayers;
     profile.resolvedLlamaCppThreadCount = config.resolvedLlamaCppThreadCount;
     profile.resolvedLlamaCppContextSize = config.resolvedLlamaCppContextSize;

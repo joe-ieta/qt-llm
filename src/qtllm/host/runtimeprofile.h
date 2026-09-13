@@ -55,6 +55,8 @@ struct RuntimeProfile
     int llamaCppGpuLayers = -1;
     int llamaCppThreadCount = 0;
     int llamaCppStartupTimeoutMs = 180000;
+    int llamaCppQueueTimeoutMs = 30000;
+    int llamaCppTotalTimeoutMs = 210000;
     int resolvedLlamaCppGpuLayers = -1;
     int resolvedLlamaCppThreadCount = 0;
     int resolvedLlamaCppContextSize = 0;

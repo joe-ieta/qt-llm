@@ -14,6 +14,7 @@ class StreamChunkParser;
 
 namespace runtime {
 class ManagedLlamaCppRuntime;
+class ManagedLlamaCppRuntimeService;
 }
 
 namespace tools::runtime {
@@ -32,6 +33,8 @@ public:
     bool setProviderByName(const QString &providerName);
 
     void setToolCallOrchestrator(const std::shared_ptr<tools::runtime::ToolCallOrchestrator> &orchestrator);
+    void setManagedLlamaCppRuntimeService(
+        const std::shared_ptr<runtime::ManagedLlamaCppRuntimeService> &service);
     void setToolLoopContext(const QString &clientId, const QString &sessionId, const QString &traceId = QString());
 
     void sendPrompt(const QString &prompt);
@@ -59,11 +62,15 @@ private:
     void dispatchRequest(const LlmRequest &request);
     void finishRequest(LlmResponse response, bool emitCompatibilitySignal = true);
     bool ensureManagedRuntime(QString *errorMessage = nullptr);
+    void releaseManagedRuntimeLease();
 
 private:
     LlmConfig m_config;
     std::unique_ptr<ILLMProvider> m_provider;
     std::unique_ptr<runtime::ManagedLlamaCppRuntime> m_llamaCppRuntime;
+    std::shared_ptr<runtime::ManagedLlamaCppRuntimeService> m_managedRuntimeService;
+    QString m_managedRuntimeLeaseId;
+    QString m_managedRuntimeErrorCode;
     HttpExecutor *m_executor;
     std::unique_ptr<StreamChunkParser> m_streamParser;
     QString m_accumulatedText;

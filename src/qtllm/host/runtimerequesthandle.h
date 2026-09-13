@@ -3,9 +3,14 @@
 #include "runtimeprofile.h"
 
 #include <QObject>
+#include <memory>
 
 namespace qtllm {
 class QtLLMClient;
+}
+
+namespace qtllm::runtime {
+class ManagedLlamaCppRuntimeService;
 }
 
 namespace qtllm::host {
@@ -24,6 +29,8 @@ public:
     bool isFinished() const;
     ChatRequest request() const;
     ChatResult result() const;
+    void setManagedLlamaCppRuntimeService(
+        const std::shared_ptr<runtime::ManagedLlamaCppRuntimeService> &service);
 
 public slots:
     void start();

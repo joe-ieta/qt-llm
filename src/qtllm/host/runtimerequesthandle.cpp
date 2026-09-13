@@ -122,6 +122,14 @@ ChatResult RuntimeRequestHandle::result() const
     return m_result;
 }
 
+void RuntimeRequestHandle::setManagedLlamaCppRuntimeService(
+    const std::shared_ptr<runtime::ManagedLlamaCppRuntimeService> &service)
+{
+    if (!m_started) {
+        m_client->setManagedLlamaCppRuntimeService(service);
+    }
+}
+
 void RuntimeRequestHandle::start()
 {
     if (m_started || m_finished) {

@@ -1659,6 +1659,28 @@ void QtLlmCoreTests::runtimeProfileMapperUsesStructuredMessages()
     QCOMPARE(mapped.tools.size(), 1);
 }
 
+void QtLlmCoreTests::runtimeProfileMapperMapsManagedRuntimeTimeouts()
+{
+    host::RuntimeProfile profile;
+    profile.llamaCppQueueTimeoutMs = 123;
+    profile.llamaCppStartupTimeoutMs = 456;
+    profile.timeoutMs = 789;
+    profile.llamaCppTotalTimeoutMs = 1234;
+
+    const LlmConfig config = host::RuntimeProfileMapper::toConfig(profile);
+    QCOMPARE(config.llamaCppQueueTimeoutMs, 123);
+    QCOMPARE(config.llamaCppStartupTimeoutMs, 456);
+    QCOMPARE(config.timeoutMs, 789);
+    QCOMPARE(config.llamaCppTotalTimeoutMs, 1234);
+
+    const host::RuntimeProfile mapped =
+        host::RuntimeProfileMapper::fromConfig(config);
+    QCOMPARE(mapped.llamaCppQueueTimeoutMs, 123);
+    QCOMPARE(mapped.llamaCppStartupTimeoutMs, 456);
+    QCOMPARE(mapped.timeoutMs, 789);
+    QCOMPARE(mapped.llamaCppTotalTimeoutMs, 1234);
+}
+
 void QtLlmCoreTests::runtimeFacadeParallelHandlesKeepRequestAttribution()
 {
     QTcpServer server;
@@ -1720,6 +1742,60 @@ void QtLlmCoreTests::runtimeFacadeParallelHandlesKeepRequestAttribution()
     QVERIFY(firstResult.requestId != secondResult.requestId);
     QCOMPARE(firstResult.text, QStringLiteral("ok"));
     QCOMPARE(secondResult.text, QStringLiteral("ok"));
+}
+
+void QtLlmCoreTests::runtimeFacadeManagedRequestsShareRuntimeLease()
+{
+    QTemporaryDir runtimeRoot;
+    QVERIFY(runtimeRoot.isValid());
+    const int port = availableLocalPort();
+    QVERIFY(port > 0);
+
+    LlmConfig config = managedServiceTestConfig(runtimeRoot.path(), port);
+    config.stream = false;
+    config.timeoutMs = 3000;
+    config.llamaCppQueueTimeoutMs = 3000;
+    config.llamaCppTotalTimeoutMs = 7000;
+
+    host::RuntimeFacade facade;
+    facade.setProfile(host::RuntimeProfileMapper::fromConfig(config));
+    const std::shared_ptr<qtllm::runtime::ManagedLlamaCppRuntimeService> service =
+        facade.managedLlamaCppRuntimeService();
+    QVERIFY(service);
+
+    qputenv("QTLLM_FAKE_LLAMA_RESPONSE_DELAY_MS", QByteArrayLiteral("300"));
+
+    host::ChatRequest firstRequest;
+    firstRequest.messages.append({QStringLiteral("user"), QStringLiteral("first")});
+    host::ChatRequest secondRequest;
+    secondRequest.messages.append({QStringLiteral("user"), QStringLiteral("second")});
+
+    host::RuntimeRequestHandle *first = facade.sendAsync(firstRequest);
+    host::RuntimeRequestHandle *second = facade.sendAsync(secondRequest);
+    QSignalSpy firstFinished(first, &host::RuntimeRequestHandle::finished);
+    QSignalSpy secondFinished(second, &host::RuntimeRequestHandle::finished);
+
+    bool observedSharedLease = false;
+    for (int attempt = 0; attempt < 300 && !observedSharedLease; ++attempt) {
+        const QList<qtllm::runtime::LlamaCppRuntimeInstanceSnapshot> snapshots =
+            service->instances();
+        observedSharedLease = snapshots.size() == 1
+            && snapshots.first().activeLeaseCount == 2;
+        if (!observedSharedLease) {
+            QTest::qWait(10);
+        }
+    }
+    QVERIFY(observedSharedLease);
+
+    QTRY_COMPARE_WITH_TIMEOUT(firstFinished.count(), 1, 5000);
+    QTRY_COMPARE_WITH_TIMEOUT(secondFinished.count(), 1, 5000);
+    QCOMPARE(firstFinished.first().first().value<host::ChatResult>().requestId,
+             first->requestId());
+    QCOMPARE(secondFinished.first().first().value<host::ChatResult>().requestId,
+             second->requestId());
+    QTRY_VERIFY_WITH_TIMEOUT(service->instances().isEmpty(), 3000);
+
+    qunsetenv("QTLLM_FAKE_LLAMA_RESPONSE_DELAY_MS");
 }
 
 void QtLlmCoreTests::structuredOutputValidatesJsonAndSchema()
@@ -2234,7 +2310,7 @@ int main(int argc, char *argv[])
             while (server.hasPendingConnections()) {
                 QTcpSocket *socket = server.nextPendingConnection();
                 QObject::connect(socket, &QTcpSocket::readyRead, socket, [socket, readyAfterProbes, probeCountPath, &readinessProbeCount]() {
-                    socket->readAll();
+                    const QByteArray requestBytes = socket->readAll();
                     ++readinessProbeCount;
                     if (!probeCountPath.isEmpty()) {
                         QFile probeCountFile(probeCountPath);
@@ -2252,8 +2328,21 @@ int main(int argc, char *argv[])
                     response += "Content-Length: " + QByteArray::number(payload.size()) + "\r\n";
                     response += QByteArrayLiteral("Connection: close\r\n\r\n");
                     response += payload;
-                    socket->write(response);
-                    socket->disconnectFromHost();
+                    const auto sendResponse = [socket, response]() {
+                        socket->write(response);
+                        socket->disconnectFromHost();
+                    };
+                    bool delayOk = false;
+                    const int responseDelayMs = QString::fromLocal8Bit(
+                        qgetenv("QTLLM_FAKE_LLAMA_RESPONSE_DELAY_MS"))
+                                                    .toInt(&delayOk);
+                    if (requestBytes.startsWith("POST ")
+                        && delayOk
+                        && responseDelayMs > 0) {
+                        QTimer::singleShot(responseDelayMs, socket, sendResponse);
+                    } else {
+                        sendResponse();
+                    }
                 });
                 QObject::connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
             }

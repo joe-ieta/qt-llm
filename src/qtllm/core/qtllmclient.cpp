@@ -9,6 +9,7 @@
 #include "../providers/illmprovider.h"
 #include "../providers/providerfactory.h"
 #include "../runtime/managedllamacppruntime.h"
+#include "../runtime/managedllamacppruntimeservice.h"
 #include "../streaming/streamchunkparser.h"
 #include "../tools/runtime/toolcallorchestrator.h"
 #include "../tools/runtime/toolruntime_types.h"
@@ -54,7 +55,10 @@ QtLLMClient::QtLLMClient(QObject *parent)
     wireExecutor();
 }
 
-QtLLMClient::~QtLLMClient() = default;
+QtLLMClient::~QtLLMClient()
+{
+    releaseManagedRuntimeLease();
+}
 
 void QtLLMClient::setConfig(const LlmConfig &config)
 {
@@ -95,6 +99,16 @@ void QtLLMClient::setToolCallOrchestrator(
     if (orchestrator) {
         m_toolOrchestrator = orchestrator;
     }
+}
+
+void QtLLMClient::setManagedLlamaCppRuntimeService(
+    const std::shared_ptr<runtime::ManagedLlamaCppRuntimeService> &service)
+{
+    if (m_managedRuntimeService == service) {
+        return;
+    }
+    releaseManagedRuntimeLease();
+    m_managedRuntimeService = service;
 }
 
 void QtLLMClient::setToolLoopContext(const QString &clientId, const QString &sessionId, const QString &traceId)
@@ -187,7 +201,9 @@ void QtLLMClient::sendRequest(const LlmRequest &request)
         LlmResponse response;
         response.errorMessage = runtimeError;
         response.error.category = LlmErrorCategory::Runtime;
-        response.error.code = QStringLiteral("managed_runtime_unavailable");
+        response.error.code = m_managedRuntimeErrorCode.isEmpty()
+            ? QStringLiteral("managed_runtime_unavailable")
+            : m_managedRuntimeErrorCode;
         response.error.message = runtimeError;
         finishRequest(response);
         return;
@@ -208,11 +224,16 @@ void QtLLMClient::cancelCurrentRequest()
     emit cancellationRequested(m_activeRequestId);
     events::LlmEventDispatcher::instance().recordCancellationRequested(
         m_toolLoopClientId, m_toolLoopSessionId, m_toolLoopTraceId, m_activeRequestId);
+    if (m_managedRuntimeService && m_managedRuntimeLeaseId.isEmpty()) {
+        m_managedRuntimeService->cancelAcquire(m_activeRequestId);
+    }
     m_executor->cancel();
 }
 
 void QtLLMClient::beginRequest(const QString &requestId)
 {
+    releaseManagedRuntimeLease();
+    m_managedRuntimeErrorCode.clear();
     m_requestActive = true;
     m_terminalEmitted = false;
     m_activeRequestId = requestId.trimmed().isEmpty()
@@ -291,6 +312,7 @@ void QtLLMClient::finishRequest(LlmResponse response, bool emitCompatibilitySign
         response.canceled = response.error.category == LlmErrorCategory::Canceled;
     }
 
+    releaseManagedRuntimeLease();
     m_streamParser->clear();
     emit requestFinished(response);
 
@@ -314,13 +336,39 @@ bool QtLLMClient::ensureManagedRuntime(QString *errorMessage)
         return true;
     }
 
-    if (!m_llamaCppRuntime) {
-        m_llamaCppRuntime = std::make_unique<runtime::ManagedLlamaCppRuntime>(this);
-    }
-
     QString runtimeError;
     LlmConfig runtimeConfig = m_config;
-    if (!m_llamaCppRuntime->ensureRunning(&runtimeConfig, &runtimeError)) {
+    if (m_managedRuntimeService) {
+        runtime::LlamaCppRuntimeAcquireOptions options;
+        options.requestId = m_activeRequestId;
+        options.callerId = m_toolLoopClientId.trimmed().isEmpty()
+            ? QStringLiteral("qtllm-client")
+            : m_toolLoopClientId;
+        options.queueTimeoutMs = m_config.llamaCppQueueTimeoutMs;
+        options.startupTimeoutMs = m_config.llamaCppStartupTimeoutMs;
+        options.requestTimeoutMs = m_config.timeoutMs;
+        options.totalTimeoutMs = m_config.llamaCppTotalTimeoutMs;
+        const runtime::LlamaCppRuntimeLease lease =
+            m_managedRuntimeService->acquire(runtimeConfig, options, &runtimeError);
+        if (lease.isValid()) {
+            m_managedRuntimeLeaseId = lease.leaseId;
+            runtimeConfig = lease.config;
+            runtimeConfig.timeoutMs = lease.requestTimeoutMs;
+        } else {
+            m_managedRuntimeErrorCode = lease.errorCode;
+        }
+    } else {
+        if (!m_llamaCppRuntime) {
+            m_llamaCppRuntime =
+                std::make_unique<runtime::ManagedLlamaCppRuntime>(this);
+        }
+        if (!m_llamaCppRuntime->ensureRunning(&runtimeConfig, &runtimeError)) {
+            m_managedRuntimeErrorCode =
+                QStringLiteral("managed_runtime_unavailable");
+        }
+    }
+
+    if (!runtimeError.isEmpty()) {
         logging::QtLlmLogger::instance().error(QStringLiteral("llm.runtime"),
                                                QStringLiteral("Managed llama.cpp runtime failed"),
                                                logContext(m_toolLoopClientId, m_toolLoopSessionId, m_activeRequestId, m_toolLoopTraceId),
@@ -336,6 +384,16 @@ bool QtLLMClient::ensureManagedRuntime(QString *errorMessage)
         m_provider->setConfig(m_config);
     }
     return true;
+}
+
+void QtLLMClient::releaseManagedRuntimeLease()
+{
+    if (!m_managedRuntimeService || m_managedRuntimeLeaseId.isEmpty()) {
+        return;
+    }
+    const QString leaseId = m_managedRuntimeLeaseId;
+    m_managedRuntimeLeaseId.clear();
+    m_managedRuntimeService->release(leaseId);
 }
 
 void QtLLMClient::wireExecutor()

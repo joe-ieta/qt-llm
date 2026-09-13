@@ -54,7 +54,9 @@ private slots:
     void httpExecutorCancelDuringRetryBackoffDoesNotRestart();
     void llmEventDispatcherFansOutAndDetachesSinks();
     void runtimeProfileMapperUsesStructuredMessages();
+    void runtimeProfileMapperMapsManagedRuntimeTimeouts();
     void runtimeFacadeParallelHandlesKeepRequestAttribution();
+    void runtimeFacadeManagedRequestsShareRuntimeLease();
     void structuredOutputValidatesJsonAndSchema();
     void structuredOutputSeparatesSyntaxAndSchemaFailures();
     void modelCapabilitiesKeepUnknownModelEvidence();

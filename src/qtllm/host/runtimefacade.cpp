@@ -8,6 +8,7 @@
 #include "../events/llmeventdispatcher.h"
 #include "../identity/compactid.h"
 #include "../runtime/managedllamacppruntime.h"
+#include "../runtime/managedllamacppruntimeservice.h"
 #include "../toolsinside/toolsinsideruntime.h"
 
 #include <QEventLoop>
@@ -38,10 +39,12 @@ QJsonObject requestToJson(const LlmRequest &request)
 
 RuntimeFacade::RuntimeFacade(QObject *parent)
     : QObject(parent)
+    , m_runtimeService(std::make_shared<runtime::ManagedLlamaCppRuntimeService>())
     , m_client(new QtLLMClient(this))
 {
     qRegisterMetaType<qtllm::host::ChatResult>("qtllm::host::ChatResult");
     qRegisterMetaType<qtllm::host::LocalModelInfo>("qtllm::host::LocalModelInfo");
+    m_client->setManagedLlamaCppRuntimeService(m_runtimeService);
 
     connect(m_client, &QtLLMClient::tokenReceived, this, &RuntimeFacade::tokenReceived);
     connect(m_client, &QtLLMClient::reasoningTokenReceived, this, &RuntimeFacade::reasoningTokenReceived);
@@ -124,9 +127,25 @@ bool RuntimeFacade::refreshRuntimeAvailability(QString *message)
     return available;
 }
 
+void RuntimeFacade::setManagedLlamaCppRuntimeService(
+    const std::shared_ptr<runtime::ManagedLlamaCppRuntimeService> &service)
+{
+    m_runtimeService = service
+        ? service
+        : std::make_shared<runtime::ManagedLlamaCppRuntimeService>();
+    m_client->setManagedLlamaCppRuntimeService(m_runtimeService);
+}
+
+std::shared_ptr<runtime::ManagedLlamaCppRuntimeService>
+RuntimeFacade::managedLlamaCppRuntimeService() const
+{
+    return m_runtimeService;
+}
+
 RuntimeRequestHandle *RuntimeFacade::sendAsync(const ChatRequest &request)
 {
     auto *handle = new RuntimeRequestHandle(m_profile, request, this);
+    handle->setManagedLlamaCppRuntimeService(m_runtimeService);
     QTimer::singleShot(0, handle, &RuntimeRequestHandle::start);
     return handle;
 }
