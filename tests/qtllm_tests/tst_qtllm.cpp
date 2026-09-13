@@ -42,6 +42,7 @@
 #include "../../src/qtllm/tools/mcp/mcpserverregistry.h"
 #include "../../src/qtllm/tools/mcp/mcptoolsyncservice.h"
 #include "../../src/qtllm/tools/runtime/toolexecutionlayer.h"
+#include "../../src/qtllm/tools/runtime/toolcallorchestrator.h"
 #include "../../src/qtllm/toolsstudio/toolimportexportservice.h"
 #include "../../src/qtllm/toolsstudio/toolworkspaceservice.h"
 
@@ -1685,6 +1686,89 @@ void QtLlmCoreTests::providersMapNativeStructuredOutput()
              QStringLiteral("application/json"));
     QCOMPARE(generationConfig.value(QStringLiteral("responseSchema")).toObject(),
              constraint.schema);
+}
+
+void QtLlmCoreTests::toolPreparationReportsAuthorizationAndLimits()
+{
+    using namespace qtllm::tools::runtime;
+
+    class Hooks final : public ToolRuntimeHooks
+    {
+    public:
+        ToolAuthorizationDecision authorize(
+            const ToolCallRequest &request,
+            const ToolExecutionContext &) override
+        {
+            return request.toolId == QStringLiteral("pending")
+                ? ToolAuthorizationDecision::Pending
+                : ToolAuthorizationDecision::Allow;
+        }
+    };
+
+    ToolExecutionLayer layer;
+    layer.setHooks(std::make_shared<Hooks>());
+
+    ClientToolPolicy policy;
+    policy.maxToolsPerTurn = 2;
+    ToolCallRequest first;
+    first.callId = QStringLiteral("call-1");
+    first.toolId = QStringLiteral("allowed");
+    ToolCallRequest second;
+    second.callId = QStringLiteral("call-2");
+    second.toolId = QStringLiteral("pending");
+    ToolCallRequest third;
+    third.callId = QStringLiteral("call-3");
+    third.toolId = QStringLiteral("overflow");
+
+    const ToolBatchPreparation preparation =
+        layer.prepareBatch({first, second, third}, ToolExecutionContext(), policy);
+    QCOMPARE(preparation.readyRequests.size(), 1);
+    QCOMPARE(preparation.terminalResults.size(), 2);
+    QVERIFY(preparation.awaitingAuthorization);
+    QCOMPARE(preparation.terminalResults.at(0).status,
+             ToolExecutionStatus::AwaitingAuthorization);
+    QCOMPARE(preparation.terminalResults.at(1).status,
+             ToolExecutionStatus::LimitExceeded);
+}
+
+void QtLlmCoreTests::toolOrchestratorExternalModePairsResults()
+{
+    using namespace qtllm::tools::runtime;
+
+    ToolCallOrchestrator orchestrator;
+    orchestrator.setExecutionMode(ToolExecutionMode::External);
+
+    ToolExecutionContext context;
+    context.clientId = QStringLiteral("client");
+    context.sessionId = QStringLiteral("session");
+    context.requestId = QStringLiteral("request");
+
+    LlmResponse response;
+    response.success = true;
+    LlmToolCall call;
+    call.id = QStringLiteral("provider-call");
+    call.name = QStringLiteral("host_tool");
+    response.assistantMessage.toolCalls.append(call);
+
+    const ToolLoopOutcome pending = orchestrator.processAssistantResponse(
+        QStringLiteral("model"), QStringLiteral("openai"),
+        QStringLiteral("openai-compatible"), response, context);
+    QVERIFY(pending.awaitingExternalResults);
+    QCOMPARE(pending.pendingToolCalls.size(), 1);
+    QVERIFY(!pending.pendingToolCalls.first().internalToolCallId.isEmpty());
+
+    ToolExecutionResult supplied;
+    supplied.callId = QStringLiteral("provider-call");
+    supplied.success = true;
+    supplied.output = QJsonObject{{QStringLiteral("value"), 42}};
+    const ToolLoopOutcome completed = orchestrator.completeExternalResults(
+        QStringLiteral("model"), QStringLiteral("openai"),
+        QStringLiteral("openai-compatible"), QString(),
+        pending.pendingToolCalls, {supplied}, context);
+    QVERIFY(completed.hasFollowUpPrompt);
+    QCOMPARE(completed.toolResults.size(), 1);
+    QCOMPARE(completed.toolResults.first().callId, QStringLiteral("provider-call"));
+    QCOMPARE(completed.toolResults.first().status, ToolExecutionStatus::Succeeded);
 }
 
 int main(int argc, char *argv[])

@@ -30,6 +30,11 @@ public:
     void setMcpClient(const std::shared_ptr<mcp::IMcpClient> &mcpClient);
     void setMcpServerRegistry(const std::shared_ptr<mcp::McpServerRegistry> &serverRegistry);
 
+    ToolBatchPreparation prepareBatch(
+        const QList<ToolCallRequest> &requests,
+        const ToolExecutionContext &context,
+        const ClientToolPolicy &clientPolicy = ClientToolPolicy()) const;
+
     QList<ToolExecutionResult> executeBatch(const QList<ToolCallRequest> &requests,
                                             const ToolExecutionContext &context,
                                             const ClientToolPolicy &clientPolicy = ClientToolPolicy()) const;

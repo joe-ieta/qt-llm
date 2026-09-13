@@ -12,6 +12,20 @@
 
 namespace qtllm::tools::runtime {
 
+enum class ToolExecutionMode { Internal, External };
+enum class ToolAuthorizationDecision { Allow, Deny, Pending };
+enum class ToolExecutionStatus
+{
+    Pending,
+    Succeeded,
+    Failed,
+    Denied,
+    AwaitingAuthorization,
+    LimitExceeded,
+    Canceled,
+    TimedOut
+};
+
 struct ToolCatalogSnapshot
 {
     int schemaVersion = 1;
@@ -62,6 +76,15 @@ struct ToolExecutionResult
     QString errorMessage;
     qint64 durationMs = 0;
     bool retryable = false;
+    ToolExecutionStatus status = ToolExecutionStatus::Pending;
+    bool cancelSupported = false;
+};
+
+struct ToolBatchPreparation
+{
+    QList<ToolCallRequest> readyRequests;
+    QList<ToolExecutionResult> terminalResults;
+    bool awaitingAuthorization = false;
 };
 
 struct ToolExecutionPolicy

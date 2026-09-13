@@ -71,6 +71,67 @@ void ToolExecutionLayer::setMcpServerRegistry(const std::shared_ptr<mcp::McpServ
     m_mcpServerRegistry = serverRegistry;
 }
 
+ToolBatchPreparation ToolExecutionLayer::prepareBatch(
+    const QList<ToolCallRequest> &requests,
+    const ToolExecutionContext &context,
+    const ClientToolPolicy &clientPolicy) const
+{
+    ToolBatchPreparation preparation;
+    const int limit = qMax(1, clientPolicy.maxToolsPerTurn);
+
+    for (int index = 0; index < requests.size(); ++index) {
+        ToolCallRequest request = requests.at(index);
+        request.toolId = resolveToolId(request.toolId);
+
+        ToolExecutionResult result;
+        result.callId = request.callId;
+        result.externalCallId = request.externalCallId.trimmed().isEmpty()
+            ? request.callId
+            : request.externalCallId;
+        result.internalToolCallId = request.internalToolCallId;
+        result.toolId = request.toolId;
+
+        if (index >= limit) {
+            result.status = ToolExecutionStatus::LimitExceeded;
+            result.errorCode = QStringLiteral("tool_limit_exceeded");
+            result.errorMessage = QStringLiteral("Tool call exceeds maxToolsPerTurn");
+            preparation.terminalResults.append(result);
+            continue;
+        }
+
+        if (!m_policy.isToolAllowed(request.toolId, clientPolicy)) {
+            result.status = ToolExecutionStatus::Denied;
+            result.errorCode = QStringLiteral("tool_denied");
+            result.errorMessage = QStringLiteral("Tool is not allowed by client policy");
+            preparation.terminalResults.append(result);
+            continue;
+        }
+
+        const ToolAuthorizationDecision decision = m_hooks
+            ? m_hooks->authorize(request, context)
+            : ToolAuthorizationDecision::Allow;
+        if (decision == ToolAuthorizationDecision::Deny) {
+            result.status = ToolExecutionStatus::Denied;
+            result.errorCode = QStringLiteral("tool_authorization_denied");
+            result.errorMessage = QStringLiteral("Tool execution was denied by authorization hook");
+            preparation.terminalResults.append(result);
+            continue;
+        }
+        if (decision == ToolAuthorizationDecision::Pending) {
+            result.status = ToolExecutionStatus::AwaitingAuthorization;
+            result.errorCode = QStringLiteral("tool_authorization_pending");
+            result.errorMessage = QStringLiteral("Tool execution is waiting for authorization");
+            preparation.terminalResults.append(result);
+            preparation.awaitingAuthorization = true;
+            continue;
+        }
+
+        preparation.readyRequests.append(request);
+    }
+
+    return preparation;
+}
+
 QList<ToolExecutionResult> ToolExecutionLayer::executeBatch(const QList<ToolCallRequest> &requests,
                                                             const ToolExecutionContext &context,
                                                             const ClientToolPolicy &clientPolicy) const

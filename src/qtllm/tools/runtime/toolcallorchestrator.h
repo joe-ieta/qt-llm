@@ -18,6 +18,11 @@ struct ToolLoopOutcome
     bool terminatedByFailureGuard = false;
     int consecutiveFailures = 0;
     int roundIndex = 0;
+    ToolExecutionMode executionMode = ToolExecutionMode::Internal;
+    QList<ToolCallRequest> pendingToolCalls;
+    QList<ToolExecutionResult> toolResults;
+    bool awaitingAuthorization = false;
+    bool awaitingExternalResults = false;
 };
 
 class ToolCallOrchestrator
@@ -30,6 +35,7 @@ public:
 
     void setMaxConsecutiveFailures(int maxConsecutiveFailures);
     void setMaxRounds(int maxRounds);
+    void setExecutionMode(ToolExecutionMode mode);
 
     void resetSession(const QString &clientId, const QString &sessionId);
 
@@ -44,6 +50,15 @@ public:
                                             const QString &providerName,
                                             const LlmResponse &response,
                                             const ToolExecutionContext &context) const;
+
+    ToolLoopOutcome completeExternalResults(
+        const QString &modelName,
+        const QString &modelVendor,
+        const QString &providerName,
+        const QString &assistantText,
+        const QList<ToolCallRequest> &pendingRequests,
+        const QList<ToolExecutionResult> &results,
+        const ToolExecutionContext &context) const;
 
 private:
     struct ToolLoopState
@@ -64,6 +79,7 @@ private:
     std::shared_ptr<protocol::ToolCallProtocolRouter> m_protocolRouter;
     int m_maxConsecutiveFailures = 3;
     int m_maxRounds = 5;
+    ToolExecutionMode m_executionMode = ToolExecutionMode::Internal;
     mutable QHash<QString, ToolLoopState> m_stateBySession;
 };
 

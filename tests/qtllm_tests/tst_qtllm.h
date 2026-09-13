@@ -56,6 +56,8 @@ private slots:
     void structuredOutputSeparatesSyntaxAndSchemaFailures();
     void modelCapabilitiesKeepUnknownModelEvidence();
     void providersMapNativeStructuredOutput();
+    void toolPreparationReportsAuthorizationAndLimits();
+    void toolOrchestratorExternalModePairsResults();
     void streamChunkParserHandlesFragmentedInput();
     void streamChunkParserTakePendingLine();
 };

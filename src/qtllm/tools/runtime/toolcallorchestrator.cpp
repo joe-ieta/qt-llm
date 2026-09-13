@@ -51,6 +51,11 @@ void ToolCallOrchestrator::setMaxRounds(int maxRounds)
     m_maxRounds = qMax(1, maxRounds);
 }
 
+void ToolCallOrchestrator::setExecutionMode(ToolExecutionMode mode)
+{
+    m_executionMode = mode;
+}
+
 void ToolCallOrchestrator::resetSession(const QString &clientId, const QString &sessionId)
 {
     const QString key = clientId.trimmed() + QStringLiteral("::") + sessionId.trimmed();
@@ -196,6 +201,23 @@ ToolLoopOutcome ToolCallOrchestrator::processToolCalls(const std::shared_ptr<pro
         }
     }
 
+    outcome.executionMode = m_executionMode;
+    if (m_executionMode == ToolExecutionMode::External) {
+        ToolExecutionContext executionContext = context;
+        executionContext.extra.insert(QStringLiteral("toolLoopRoundIndex"), currentRound);
+        const ToolBatchPreparation preparation =
+            m_executionLayer->prepareBatch(executionRequests, executionContext, policy);
+
+        outcome.pendingToolCalls = preparation.readyRequests;
+        outcome.toolResults = preparation.terminalResults;
+        outcome.awaitingAuthorization = preparation.awaitingAuthorization;
+        outcome.awaitingExternalResults = !preparation.readyRequests.isEmpty();
+
+        state.rounds += 1;
+        m_stateBySession.insert(key, state);
+        return outcome;
+    }
+
     ToolExecutionContext executionContext = context;
     executionContext.extra.insert(QStringLiteral("toolLoopRoundIndex"), currentRound);
     events::LlmEventDispatcher::instance().recordToolBatchStarted(executionContext,
@@ -249,6 +271,71 @@ ToolLoopOutcome ToolCallOrchestrator::processToolCalls(const std::shared_ptr<pro
                                           QJsonObject{{QStringLiteral("resultCount"), results.size()},
                                                       {QStringLiteral("failureCount"), failureCount},
                                                       {QStringLiteral("rounds"), state.rounds}});
+    return outcome;
+}
+
+ToolLoopOutcome ToolCallOrchestrator::completeExternalResults(
+    const QString &modelName,
+    const QString &modelVendor,
+    const QString &providerName,
+    const QString &assistantText,
+    const QList<ToolCallRequest> &pendingRequests,
+    const QList<ToolExecutionResult> &results,
+    const ToolExecutionContext &context) const
+{
+    Q_UNUSED(context)
+    ToolLoopOutcome outcome;
+    outcome.executionMode = ToolExecutionMode::External;
+
+    const auto adapter = m_protocolRouter
+        ? m_protocolRouter->route(modelName, modelVendor, providerName)
+        : std::shared_ptr<protocol::IToolCallProtocolAdapter>();
+    if (!adapter) {
+        outcome.terminatedByFailureGuard = true;
+        return outcome;
+    }
+
+    for (const ToolCallRequest &request : pendingRequests) {
+        ToolExecutionResult matched;
+        bool found = false;
+        for (const ToolExecutionResult &candidate : results) {
+            if (candidate.callId == request.callId) {
+                matched = candidate;
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            matched.callId = request.callId;
+            matched.externalCallId = request.externalCallId;
+            matched.internalToolCallId = request.internalToolCallId;
+            matched.toolId = request.toolId;
+            matched.status = ToolExecutionStatus::Failed;
+            matched.errorCode = QStringLiteral("external_tool_result_missing");
+            matched.errorMessage = QStringLiteral("Host did not return a result for the tool call");
+        } else {
+            if (matched.externalCallId.isEmpty()) {
+                matched.externalCallId = request.externalCallId;
+            }
+            if (matched.internalToolCallId.isEmpty()) {
+                matched.internalToolCallId = request.internalToolCallId;
+            }
+            if (matched.toolId.isEmpty()) {
+                matched.toolId = request.toolId;
+            }
+            if (matched.status == ToolExecutionStatus::Pending) {
+                matched.status = matched.success
+                    ? ToolExecutionStatus::Succeeded
+                    : ToolExecutionStatus::Failed;
+            }
+        }
+        outcome.toolResults.append(matched);
+    }
+
+    outcome.followUpPrompt =
+        adapter->buildFollowUpPrompt(assistantText, outcome.toolResults);
+    outcome.hasFollowUpPrompt = !outcome.followUpPrompt.trimmed().isEmpty();
     return outcome;
 }
 
