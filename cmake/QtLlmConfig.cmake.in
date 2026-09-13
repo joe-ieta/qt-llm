@@ -2,9 +2,41 @@
 
 include(CMakeFindDependencyMacro)
 
-find_dependency(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core Network Sql)
-find_dependency(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Network Sql)
+set(_qtllm_need_core FALSE)
+set(_qtllm_need_aggregate FALSE)
 
-include("${CMAKE_CURRENT_LIST_DIR}/QtLlmTargets.cmake")
+if(NOT QtLlm_FIND_COMPONENTS)
+    set(_qtllm_need_core TRUE)
+    set(_qtllm_need_aggregate TRUE)
+else()
+    foreach(_qtllm_component IN LISTS QtLlm_FIND_COMPONENTS)
+        if(_qtllm_component STREQUAL "Core")
+            set(_qtllm_need_core TRUE)
+        elseif(_qtllm_component STREQUAL "QtLlm")
+            set(_qtllm_need_aggregate TRUE)
+        else()
+            set(QtLlm_${_qtllm_component}_FOUND FALSE)
+            set(QtLlm_NOT_FOUND_MESSAGE "Unsupported QtLlm component: ${_qtllm_component}")
+        endif()
+    endforeach()
+endif()
+
+find_dependency(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core Network)
+find_dependency(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Network)
+
+if(_qtllm_need_core)
+    include("${CMAKE_CURRENT_LIST_DIR}/QtLlmCoreTargets.cmake")
+    set(QtLlm_Core_FOUND TRUE)
+endif()
+
+if(_qtllm_need_aggregate)
+    find_dependency(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Sql)
+    include("${CMAKE_CURRENT_LIST_DIR}/QtLlmTargets.cmake")
+    set(QtLlm_QtLlm_FOUND TRUE)
+endif()
+
+unset(_qtllm_need_core)
+unset(_qtllm_need_aggregate)
+unset(_qtllm_component)
 
 check_required_components(QtLlm)

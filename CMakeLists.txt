@@ -19,6 +19,11 @@ endif()
 option(QTLLM_BUILD_APPS "Build sample apps and agent demo" ${_qtllm_optional_targets_default})
 option(QTLLM_BUILD_TESTS "Build tests target" ${_qtllm_optional_targets_default})
 option(QTLLM_ENABLE_INSTALL "Enable install and package export rules" ${_qtllm_install_default})
+set(QTLLM_LIBRARY_TYPE "STATIC" CACHE STRING "Build qt-llm libraries as STATIC or SHARED")
+set_property(CACHE QTLLM_LIBRARY_TYPE PROPERTY STRINGS STATIC SHARED)
+if(NOT QTLLM_LIBRARY_TYPE STREQUAL "STATIC" AND NOT QTLLM_LIBRARY_TYPE STREQUAL "SHARED")
+    message(FATAL_ERROR "QTLLM_LIBRARY_TYPE must be STATIC or SHARED")
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -57,8 +62,13 @@ endif()
 add_subdirectory(src/qtllm)
 
 add_library(QtLlm::QtLlm ALIAS qtllm)
+add_library(QtLlm::Core ALIAS qtllm_core)
 set_target_properties(qtllm PROPERTIES
     EXPORT_NAME QtLlm
+    INTERFACE_INCLUDE_DIRECTORIES "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/qtllm>;$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+)
+set_target_properties(qtllm_core PROPERTIES
+    EXPORT_NAME Core
     INTERFACE_INCLUDE_DIRECTORIES "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/qtllm>;$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
@@ -74,6 +84,7 @@ endif()
 if(QTLLM_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests/qtllm_tests)
+    add_subdirectory(tests/core_component)
 endif()
 
 if(QT_VERSION_MAJOR EQUAL 6)
@@ -83,6 +94,12 @@ else()
 endif()
 
 if(QTLLM_ENABLE_INSTALL)
+    install(TARGETS qtllm_core EXPORT QtLlmCoreTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    )
     install(TARGETS qtllm EXPORT QtLlmTargets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -90,8 +107,8 @@ if(QTLLM_ENABLE_INSTALL)
         INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     )
     foreach(_qtllm_public_header_dir
-            chat core events host identity logging network profile providers runtime
-            storage streaming tools toolsinside toolsstudio)
+            chat context core events host identity logging network profile providers runtime
+            storage streaming structuredoutput tools toolsinside toolsstudio)
         install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src/qtllm/${_qtllm_public_header_dir}"
             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
             FILES_MATCHING PATTERN "*.h"
@@ -99,6 +116,11 @@ if(QTLLM_ENABLE_INSTALL)
     endforeach()
     install(EXPORT QtLlmTargets
         FILE QtLlmTargets.cmake
+        NAMESPACE QtLlm::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/QtLlm
+    )
+    install(EXPORT QtLlmCoreTargets
+        FILE QtLlmCoreTargets.cmake
         NAMESPACE QtLlm::
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/QtLlm
     )
