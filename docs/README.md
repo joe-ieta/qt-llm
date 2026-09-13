@@ -31,6 +31,12 @@
 3. [构建和测试](./30-development/build-and-test.md)
 4. [编码规范](./30-development/coding-guidelines.md)
 
+参与基础能力优化与集成改造：
+
+1. [通用 LLM 基础能力优化方案](./00-project/llm-foundation-optimization-plan.md)：基于 qt-llm 与 CoReader 实际集成分析，定义目标架构、公共接口、兼容迁移及分阶段验收；优化方向已确认，尚未实施。
+2. [qt-llm 基础能力优化开发工作包](./00-project/qtllm-optimization-work-packages.md)：qt-llm 侧可独立开发、评审和验收的任务及依赖关系。
+3. [CoReader 集成改造开发工作包](./00-project/coreader-integration-work-packages.md)：CoReader 侧采用与迁移任务、跨项目依赖及回归要求。
+
 ## 文档分区
 
 - [00-project](./00-project/)：定位、功能、路线、待办、决策。

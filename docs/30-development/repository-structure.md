@@ -1,8 +1,8 @@
 # 仓库结构
 
-```text
+`	ext
 qt-llm/
-  qt-llm.pro
+  CMakeLists.txt
   src/
     qtllm/
     apps/
@@ -18,7 +18,7 @@ qt-llm/
     50-reference/
     releases/
     archive/
-```
+`
 
 ## src/qtllm
 

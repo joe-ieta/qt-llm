@@ -3,24 +3,24 @@
 ## Host
 
 - `qtllm::host::RuntimeFacade`
-- `qtllm::host::RuntimeProfile`
-- `qtllm::host::ChatRequest`
-- `qtllm::host::ChatResult`
-- `qtllm::host::LocalModelInfo`
+- `qtllm::host::RuntimeProfile`（struct）
+- `qtllm::host::ChatRequest`（struct）
+- `qtllm::host::ChatResult`（struct）
+- `qtllm::host::LocalModelInfo`（struct）
 - `qtllm::host::ModelCatalogService`
 
 ## Core
 
-- `qtllm::LlmConfig`
-- `qtllm::LlmRequest`
-- `qtllm::LlmResponse`
+- `qtllm::core::LlmConfig`（struct）
+- `qtllm::core::LlmRequest`（struct）
+- `qtllm::core::LlmResponse`（struct）
 - `qtllm::QtLLMClient`
 
 ## Chat
 
 - `qtllm::ConversationClient`
 - `qtllm::ConversationClientFactory`
-- `qtllm::ConversationSnapshot`
+- `qtllm::ConversationSnapshot`（struct）
 
 ## Provider / Runtime
 

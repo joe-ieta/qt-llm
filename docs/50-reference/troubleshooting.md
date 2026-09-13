@@ -57,7 +57,7 @@ qt-llm 的 managed runtime 会在启动前检查目标端口，端口已有 serv
 
 ## Qt Creator 编译异常
 
-先重新运行 qmake。涉及 `Q_OBJECT` 的新类或移动文件后，旧 moc 生成物可能失效。
+先清理并重新配置 CMake。涉及 `Q_OBJECT` 的新类或移动文件后，先 rerun configure 以便重建 moc/rcc 产物。
 
 ## 文档和代码不一致
 

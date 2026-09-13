@@ -1,0 +1,33 @@
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Widgets Network Sql)
+
+file(GLOB_RECURSE PDF_TRANSLATOR_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
+)
+list(FILTER PDF_TRANSLATOR_SOURCES EXCLUDE REGEX "/(release|debug)/")
+list(FILTER PDF_TRANSLATOR_SOURCES EXCLUDE REGEX "/moc_.*\\.cpp$")
+
+file(GLOB_RECURSE PDF_TRANSLATOR_HEADERS CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/*.h"
+)
+list(FILTER PDF_TRANSLATOR_HEADERS EXCLUDE REGEX "/(release|debug)/")
+list(FILTER PDF_TRANSLATOR_HEADERS EXCLUDE REGEX "/moc_.*\\.h$")
+
+add_executable(pdf_translator_agent
+    ${PDF_TRANSLATOR_SOURCES}
+    ${PDF_TRANSLATOR_HEADERS}
+)
+
+target_include_directories(pdf_translator_agent
+    PRIVATE
+    "${PROJECT_SOURCE_DIR}/src/qtllm"
+)
+
+target_link_libraries(pdf_translator_agent
+    PRIVATE
+    qtllm
+    Qt${QT_VERSION_MAJOR}::Core
+    Qt${QT_VERSION_MAJOR}::Gui
+    Qt${QT_VERSION_MAJOR}::Widgets
+    Qt${QT_VERSION_MAJOR}::Network
+    Qt${QT_VERSION_MAJOR}::Sql
+)

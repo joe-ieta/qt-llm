@@ -625,31 +625,14 @@ void QtLlmCoreTests::managedLlamaCppRuntimeWaitsForHttpReadiness()
     model.write("gguf");
     model.close();
 
-    QTcpServer readinessServer;
-    QVERIFY(readinessServer.listen(QHostAddress::LocalHost, 0));
-    const int port = readinessServer.serverPort();
-    int readinessProbeCount = 0;
-    ::QObject::connect(&readinessServer, &QTcpServer::newConnection, &readinessServer, [&readinessServer, &readinessProbeCount]() {
-        while (readinessServer.hasPendingConnections()) {
-            QTcpSocket *socket = readinessServer.nextPendingConnection();
-            ::QObject::connect(socket, &QTcpSocket::readyRead, socket, [socket, &readinessProbeCount]() {
-                socket->readAll();
-                ++readinessProbeCount;
-                const bool ready = readinessProbeCount >= 3;
-                const QByteArray payload = ready ? QByteArrayLiteral(R"({"status":"ok"})")
-                                                 : QByteArrayLiteral(R"({"status":"loading"})");
-                QByteArray response = ready ? QByteArrayLiteral("HTTP/1.1 200 OK\r\n")
-                                            : QByteArrayLiteral("HTTP/1.1 503 Service Unavailable\r\n");
-                response += QByteArrayLiteral("Content-Type: application/json\r\n");
-                response += "Content-Length: " + QByteArray::number(payload.size()) + "\r\n";
-                response += QByteArrayLiteral("Connection: close\r\n\r\n");
-                response += payload;
-                socket->write(response);
-                socket->disconnectFromHost();
-            });
-            ::QObject::connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
-        }
-    });
+    QTcpServer portReservation;
+    QVERIFY(portReservation.listen(QHostAddress::LocalHost, 0));
+    const int port = portReservation.serverPort();
+    portReservation.close();
+
+    const QString probeCountPath = runtimeDir.filePath(QStringLiteral("probe-count.txt"));
+    qputenv("QTLLM_FAKE_LLAMA_READY_AFTER_PROBES", QByteArrayLiteral("3"));
+    qputenv("QTLLM_FAKE_LLAMA_PROBE_COUNT_FILE", QFile::encodeName(probeCountPath));
 
     LlmConfig config;
     config.providerName = QStringLiteral("llama-cpp");
@@ -661,9 +644,15 @@ void QtLlmCoreTests::managedLlamaCppRuntimeWaitsForHttpReadiness()
 
     qtllm::runtime::ManagedLlamaCppRuntime runtime;
     QString errorMessage;
-    QVERIFY2(runtime.ensureRunning(&config, &errorMessage), qPrintable(errorMessage));
+    const bool running = runtime.ensureRunning(&config, &errorMessage);
     runtime.stop();
-    QVERIFY(readinessProbeCount >= 3);
+    qunsetenv("QTLLM_FAKE_LLAMA_READY_AFTER_PROBES");
+    qunsetenv("QTLLM_FAKE_LLAMA_PROBE_COUNT_FILE");
+
+    QVERIFY2(running, qPrintable(errorMessage));
+    QFile probeCountFile(probeCountPath);
+    QVERIFY(probeCountFile.open(QIODevice::ReadOnly));
+    QVERIFY(probeCountFile.readAll().trimmed().toInt() >= 3);
 }
 
 void QtLlmCoreTests::openAiCompatibleBuildRequestNormalizesPath()

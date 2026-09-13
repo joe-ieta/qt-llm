@@ -72,17 +72,17 @@ docs/archive/                 历史文档归档
 
 ## 构建
 
-项目当前基线是 Qt + qmake + C++17。
+项目当前基线是 Qt + CMake + C++17。
 
 ```powershell
-qmake qt-llm.pro
-nmake /NOLOGO
+cmake -S . -B build
+cmake --build build --config Release
 ```
 
 测试入口：
 
 ```powershell
-tests\qtllm_tests\release\qtllm_tests.exe
+./build/bin/Release/qtllm_tests.exe
 ```
 
 ## 文档入口
