@@ -2,7 +2,7 @@
 
 - 文档版本：1.0
 - 编制日期：2026-09-13
-- 状态：实施中；QTL-00 已于 2026-09-13 完成
+- 状态：实施中；QTL-00、QTL-01 已完成
 - 上位方案：[qt-llm 通用 LLM 基础能力优化方案](./llm-foundation-optimization-plan.md)
 - 适用仓库：E:\CodexDev\qt-llm
 
@@ -56,6 +56,8 @@
 依赖：无。完成后 QTL-01、QTL-02、QTL-03 可并行。
 
 ### QTL-01 CMake 发布与消费出口
+
+状态：已完成。集成说明与验证矩阵见 [CMake 集成 qt-llm](../30-development/cmake-consumption.md)。
 
 目标：让外部项目通过稳定 target 使用 qt-llm，不再编译内部源码。
 
