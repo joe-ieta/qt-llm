@@ -753,6 +753,7 @@ bool ManagedLlamaCppRuntime::ensureRunning(LlmConfig *config, QString *errorMess
         }
         return false;
     }
+    m_stopRequested.store(false);
 
     const LlamaCppLaunchPlan launchPlan = buildLaunchPlan(*config, layout, modelPath);
     config->resolvedLlamaCppGpuMode = launchPlan.gpuMode;
@@ -801,6 +802,10 @@ bool ManagedLlamaCppRuntime::ensureRunning(LlmConfig *config, QString *errorMess
                         {QStringLiteral("runtimePlan"), config->runtimePlanSummary},
                         {QStringLiteral("runtimePlanWarnings"), QJsonArray::fromStringList(config->runtimePlanWarnings)},
                         {QStringLiteral("ownedByThisRuntime"), false}});
+        m_activeExecutablePath = executablePath;
+        m_activeModelPath = modelPath;
+        m_activePort = port;
+        m_externalService = true;
         if (errorMessage) {
             errorMessage->clear();
         }
@@ -841,6 +846,7 @@ bool ManagedLlamaCppRuntime::ensureRunning(LlmConfig *config, QString *errorMess
                     {QStringLiteral("resolvedContextSize"), config->resolvedLlamaCppContextSize}});
 
     m_process->setProgram(executablePath);
+    m_externalService = false;
     m_process->setArguments(args);
     m_process->setWorkingDirectory(layout.rootDir);
     m_process->setProcessChannelMode(QProcess::MergedChannels);
@@ -872,19 +878,37 @@ bool ManagedLlamaCppRuntime::ensureRunning(LlmConfig *config, QString *errorMess
     return true;
 }
 
+bool ManagedLlamaCppRuntime::ownsProcess() const
+{
+    return m_process
+        && m_process->state() != QProcess::NotRunning
+        && !m_externalService;
+}
+
+bool ManagedLlamaCppRuntime::isRunning() const
+{
+    return m_externalService
+        || (m_process && m_process->state() != QProcess::NotRunning);
+}
+
+void ManagedLlamaCppRuntime::requestStop()
+{
+    m_stopRequested.store(true);
+}
+
 void ManagedLlamaCppRuntime::stop()
 {
-    if (!m_process || m_process->state() == QProcess::NotRunning) {
-        return;
-    }
-    m_process->terminate();
-    if (!m_process->waitForFinished(3000)) {
-        m_process->kill();
-        m_process->waitForFinished(3000);
+    if (m_process && m_process->state() != QProcess::NotRunning) {
+        m_process->terminate();
+        if (!m_process->waitForFinished(3000)) {
+            m_process->kill();
+            m_process->waitForFinished(3000);
+        }
     }
     m_activeExecutablePath.clear();
     m_activeModelPath.clear();
     m_activePort = 0;
+    m_externalService = false;
 }
 
 bool ManagedLlamaCppRuntime::waitForServerReady(int port, int timeoutMs, QString *errorMessage) const
@@ -893,6 +917,12 @@ bool ManagedLlamaCppRuntime::waitForServerReady(int port, int timeoutMs, QString
     timer.start();
     QString lastError;
     while (timer.elapsed() < timeoutMs) {
+        if (m_stopRequested.load()) {
+            if (errorMessage) {
+                *errorMessage = QStringLiteral("llama.cpp runtime startup was canceled");
+            }
+            return false;
+        }
         int statusCode = 0;
         if (probeServerReady(port, QStringLiteral("/health"), &statusCode, &lastError)) {
             if (errorMessage) {

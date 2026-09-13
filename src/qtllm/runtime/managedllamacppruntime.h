@@ -6,6 +6,8 @@
 #include <QObject>
 #include <QString>
 
+#include <atomic>
+
 class QProcess;
 
 namespace qtllm::runtime {
@@ -58,6 +60,9 @@ public:
                                                      QString *errorMessage = nullptr);
 
     bool ensureRunning(LlmConfig *config, QString *errorMessage);
+    bool ownsProcess() const;
+    bool isRunning() const;
+    void requestStop();
     void stop();
 
 private:
@@ -71,6 +76,8 @@ private:
     QString m_activeExecutablePath;
     QString m_activeModelPath;
     int m_activePort = 0;
+    bool m_externalService = false;
+    mutable std::atomic_bool m_stopRequested {false};
 };
 
 } // namespace qtllm::runtime

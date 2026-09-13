@@ -25,6 +25,9 @@ private slots:
     void managedLlamaCppRuntimeCpuOnlyPolicyDisablesGpuLayers();
     void managedLlamaCppRuntimeReusesExistingServerPort();
     void managedLlamaCppRuntimeWaitsForHttpReadiness();
+    void managedLlamaCppRuntimeServiceSharesOwnedInstance();
+    void managedLlamaCppRuntimeServiceCancelsAndTimesOutQueuedAcquire();
+    void managedLlamaCppRuntimeServiceDoesNotStopExternalService();
     void openAiCompatibleBuildRequestNormalizesPath();
     void openAiCompatibleBuildRequestAnthropic();
     void openAiCompatibleBuildRequestGoogle();

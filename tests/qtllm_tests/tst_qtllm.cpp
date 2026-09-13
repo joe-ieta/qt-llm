@@ -40,6 +40,7 @@
 #include "../../src/qtllm/providers/openaiprovider.h"
 #include "../../src/qtllm/providers/providerfactory.h"
 #include "../../src/qtllm/runtime/managedllamacppruntime.h"
+#include "../../src/qtllm/runtime/managedllamacppruntimeservice.h"
 #include "../../src/qtllm/storage/conversationrepository.h"
 #include "../../src/qtllm/streaming/streamchunkparser.h"
 #include "../../src/qtllm/structuredoutput/structuredoutputservice.h"
@@ -696,6 +697,195 @@ void QtLlmCoreTests::managedLlamaCppRuntimeWaitsForHttpReadiness()
     QFile probeCountFile(probeCountPath);
     QVERIFY(probeCountFile.open(QIODevice::ReadOnly));
     QVERIFY(probeCountFile.readAll().trimmed().toInt() >= 3);
+}
+
+namespace {
+
+LlmConfig managedServiceTestConfig(const QString &runtimeRoot, int port)
+{
+    QDir runtimeDir(runtimeRoot);
+    runtimeDir.mkpath(QStringLiteral("bin"));
+    runtimeDir.mkpath(QStringLiteral("models"));
+    const QString modelPath =
+        runtimeDir.filePath(QStringLiteral("models/service-test.gguf"));
+    QFile model(modelPath);
+    if (model.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        model.write("gguf");
+    }
+
+    LlmConfig config;
+    config.providerName = QStringLiteral("llama-cpp");
+    config.llamaCppRuntimeRoot = runtimeRoot;
+    config.llamaCppExecutablePath = QCoreApplication::applicationFilePath();
+    config.llamaCppModelPath = modelPath;
+    config.llamaCppServerPort = port;
+    config.llamaCppStartupTimeoutMs = 5000;
+    return config;
+}
+
+int availableLocalPort()
+{
+    QTcpServer reservation;
+    if (!reservation.listen(QHostAddress::LocalHost, 0)) {
+        return 0;
+    }
+    const int port = reservation.serverPort();
+    reservation.close();
+    return port;
+}
+
+} // namespace
+
+void QtLlmCoreTests::managedLlamaCppRuntimeServiceSharesOwnedInstance()
+{
+    using namespace qtllm::runtime;
+
+    QTemporaryDir runtimeRoot;
+    QVERIFY(runtimeRoot.isValid());
+    const int port = availableLocalPort();
+    QVERIFY(port > 0);
+    const LlmConfig config = managedServiceTestConfig(runtimeRoot.path(), port);
+    QVERIFY(QFileInfo::exists(config.llamaCppModelPath));
+
+    ManagedLlamaCppRuntimeService service;
+    LlamaCppRuntimeAcquireOptions firstOptions;
+    firstOptions.requestId = QStringLiteral("shared-first");
+    firstOptions.callerId = QStringLiteral("caller-a");
+    firstOptions.startupTimeoutMs = 5000;
+    firstOptions.totalTimeoutMs = 7000;
+    firstOptions.requestTimeoutMs = 1200;
+    LlamaCppRuntimeAcquireOptions secondOptions = firstOptions;
+    secondOptions.requestId = QStringLiteral("shared-second");
+    secondOptions.callerId = QStringLiteral("caller-b");
+
+    auto firstFuture = std::async(std::launch::async, [&]() {
+        return service.acquire(config, firstOptions);
+    });
+    QThread::msleep(20);
+    auto secondFuture = std::async(std::launch::async, [&]() {
+        return service.acquire(config, secondOptions);
+    });
+
+    const LlamaCppRuntimeLease first = firstFuture.get();
+    const LlamaCppRuntimeLease second = secondFuture.get();
+    QVERIFY2(first.isValid(), qPrintable(first.errorMessage));
+    QVERIFY2(second.isValid(), qPrintable(second.errorMessage));
+    QCOMPARE(first.instanceId, second.instanceId);
+    QVERIFY(first.leaseId != second.leaseId);
+    QVERIFY(first.ownership == LlamaCppRuntimeOwnership::LibraryOwned);
+    QCOMPARE(first.requestTimeoutMs, 1200);
+
+    QList<LlamaCppRuntimeInstanceSnapshot> snapshots = service.instances();
+    QCOMPARE(snapshots.size(), 1);
+    QCOMPARE(snapshots.first().activeLeaseCount, 2);
+
+    QVERIFY(service.release(first.leaseId));
+    snapshots = service.instances();
+    QCOMPARE(snapshots.size(), 1);
+    QCOMPARE(snapshots.first().activeLeaseCount, 1);
+    QVERIFY(service.release(second.leaseId));
+    QVERIFY(service.instances().isEmpty());
+}
+
+void QtLlmCoreTests::managedLlamaCppRuntimeServiceCancelsAndTimesOutQueuedAcquire()
+{
+    using namespace qtllm::runtime;
+
+    QTemporaryDir runtimeRoot;
+    QVERIFY(runtimeRoot.isValid());
+    const int port = availableLocalPort();
+    QVERIFY(port > 0);
+    const LlmConfig firstConfig =
+        managedServiceTestConfig(runtimeRoot.path(), port);
+    LlmConfig queuedConfig = firstConfig;
+    queuedConfig.llamaCppExtraArgs =
+        QStringList{QStringLiteral("--seed"), QStringLiteral("7")};
+
+    ManagedLlamaCppRuntimeService service;
+    LlamaCppRuntimeAcquireOptions firstOptions;
+    firstOptions.requestId = QStringLiteral("port-owner");
+    firstOptions.startupTimeoutMs = 5000;
+    firstOptions.totalTimeoutMs = 7000;
+    const LlamaCppRuntimeLease owner =
+        service.acquire(firstConfig, firstOptions);
+    QVERIFY2(owner.isValid(), qPrintable(owner.errorMessage));
+
+    LlamaCppRuntimeAcquireOptions canceledOptions;
+    canceledOptions.requestId = QStringLiteral("queued-cancel");
+    canceledOptions.queueTimeoutMs = 5000;
+    canceledOptions.totalTimeoutMs = 6000;
+    auto canceledFuture = std::async(std::launch::async, [&]() {
+        return service.acquire(queuedConfig, canceledOptions);
+    });
+    QThread::msleep(50);
+    QVERIFY(service.cancelAcquire(canceledOptions.requestId));
+    const LlamaCppRuntimeLease canceled = canceledFuture.get();
+    QVERIFY(canceled.status == LlamaCppRuntimeAcquireStatus::Canceled);
+    QCOMPARE(canceled.errorCode,
+             QStringLiteral("runtime_acquire_canceled"));
+
+    LlamaCppRuntimeAcquireOptions timeoutOptions;
+    timeoutOptions.requestId = QStringLiteral("queued-timeout");
+    timeoutOptions.queueTimeoutMs = 40;
+    timeoutOptions.totalTimeoutMs = 1000;
+    const LlamaCppRuntimeLease timedOut =
+        service.acquire(queuedConfig, timeoutOptions);
+    QVERIFY(timedOut.status
+            == LlamaCppRuntimeAcquireStatus::QueueTimedOut);
+    QCOMPARE(timedOut.errorCode,
+             QStringLiteral("runtime_queue_timeout"));
+
+    QVERIFY(service.release(owner.leaseId));
+}
+
+void QtLlmCoreTests::managedLlamaCppRuntimeServiceDoesNotStopExternalService()
+{
+    using namespace qtllm::runtime;
+
+    QTemporaryDir runtimeRoot;
+    QVERIFY(runtimeRoot.isValid());
+    const int port = availableLocalPort();
+    QVERIFY(port > 0);
+    const LlmConfig config = managedServiceTestConfig(runtimeRoot.path(), port);
+
+    QProcess external;
+    external.setProgram(QCoreApplication::applicationFilePath());
+    external.setArguments(QStringList{QStringLiteral("--host"),
+                                      QStringLiteral("127.0.0.1"),
+                                      QStringLiteral("--port"),
+                                      QString::number(port)});
+    external.start();
+    QVERIFY(external.waitForStarted(3000));
+
+    bool portReady = false;
+    for (int attempt = 0; attempt < 100 && !portReady; ++attempt) {
+        QTcpSocket socket;
+        socket.connectToHost(QHostAddress::LocalHost,
+                             static_cast<quint16>(port));
+        portReady = socket.waitForConnected(50);
+        socket.disconnectFromHost();
+        if (!portReady) {
+            QThread::msleep(10);
+        }
+    }
+    QVERIFY(portReady);
+
+    ManagedLlamaCppRuntimeService service;
+    LlamaCppRuntimeAcquireOptions options;
+    options.requestId = QStringLiteral("external-service");
+    options.startupTimeoutMs = 3000;
+    options.totalTimeoutMs = 5000;
+    const LlamaCppRuntimeLease lease = service.acquire(config, options);
+    QVERIFY2(lease.isValid(), qPrintable(lease.errorMessage));
+    QVERIFY(lease.ownership == LlamaCppRuntimeOwnership::ExternalService);
+    QVERIFY(service.release(lease.leaseId));
+    QVERIFY(external.state() != QProcess::NotRunning);
+
+    external.terminate();
+    if (!external.waitForFinished(3000)) {
+        external.kill();
+        external.waitForFinished(3000);
+    }
 }
 
 void QtLlmCoreTests::openAiCompatibleBuildRequestNormalizesPath()
