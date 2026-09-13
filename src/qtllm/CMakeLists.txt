@@ -54,6 +54,86 @@ set_target_properties(qtllm_core PROPERTIES
     WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
 
+file(GLOB_RECURSE QTLLM_DIAGNOSTICS_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/events/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/logging/*.cpp"
+)
+file(GLOB_RECURSE QTLLM_DIAGNOSTICS_HEADERS CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/events/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/logging/*.h"
+)
+
+add_library(qtllm_diagnostics ${QTLLM_LIBRARY_TYPE}
+    ${QTLLM_DIAGNOSTICS_SOURCES}
+    ${QTLLM_DIAGNOSTICS_HEADERS}
+)
+add_library(qtllm::diagnostics ALIAS qtllm_diagnostics)
+target_include_directories(qtllm_diagnostics PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_definitions(qtllm_diagnostics PRIVATE QTLLM_LIBRARY)
+target_link_libraries(qtllm_diagnostics
+    PUBLIC
+    qtllm_core
+    Qt${QT_VERSION_MAJOR}::Core
+)
+set_target_properties(qtllm_diagnostics PROPERTIES
+    OUTPUT_NAME qtllm_diagnostics
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
+)
+
+file(GLOB_RECURSE QTLLM_TOOLS_COMPONENT_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/*.cpp"
+)
+file(GLOB_RECURSE QTLLM_TOOLS_COMPONENT_HEADERS CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/*.h"
+)
+list(FILTER QTLLM_TOOLS_COMPONENT_SOURCES EXCLUDE REGEX "/toolenabledchatentry\.cpp$")
+list(FILTER QTLLM_TOOLS_COMPONENT_HEADERS EXCLUDE REGEX "/toolenabledchatentry\.h$")
+
+add_library(qtllm_tools ${QTLLM_LIBRARY_TYPE}
+    ${QTLLM_TOOLS_COMPONENT_SOURCES}
+    ${QTLLM_TOOLS_COMPONENT_HEADERS}
+)
+add_library(qtllm::tools ALIAS qtllm_tools)
+target_include_directories(qtllm_tools PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_definitions(qtllm_tools PRIVATE QTLLM_LIBRARY)
+target_link_libraries(qtllm_tools
+    PUBLIC
+    qtllm_core
+    qtllm_diagnostics
+    Qt${QT_VERSION_MAJOR}::Core
+    Qt${QT_VERSION_MAJOR}::Network
+)
+set_target_properties(qtllm_tools PROPERTIES
+    OUTPUT_NAME qtllm_tools
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
+)
+
+file(GLOB_RECURSE QTLLM_LOCAL_RUNTIME_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/runtime/*.cpp"
+)
+file(GLOB_RECURSE QTLLM_LOCAL_RUNTIME_HEADERS CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/runtime/*.h"
+)
+
+add_library(qtllm_local_runtime ${QTLLM_LIBRARY_TYPE}
+    ${QTLLM_LOCAL_RUNTIME_SOURCES}
+    ${QTLLM_LOCAL_RUNTIME_HEADERS}
+)
+add_library(qtllm::local_runtime ALIAS qtllm_local_runtime)
+target_include_directories(qtllm_local_runtime PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_definitions(qtllm_local_runtime PRIVATE QTLLM_LIBRARY)
+target_link_libraries(qtllm_local_runtime
+    PUBLIC
+    qtllm_core
+    qtllm_diagnostics
+    Qt${QT_VERSION_MAJOR}::Core
+    Qt${QT_VERSION_MAJOR}::Network
+)
+set_target_properties(qtllm_local_runtime PROPERTIES
+    OUTPUT_NAME qtllm_local_runtime
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
+)
+
 add_library(qtllm ${QTLLM_LIBRARY_TYPE}
     ${QTLLM_CORE_SOURCES}
     ${QTLLM_CORE_HEADERS}

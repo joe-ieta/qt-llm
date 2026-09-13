@@ -63,12 +63,27 @@ add_subdirectory(src/qtllm)
 
 add_library(QtLlm::QtLlm ALIAS qtllm)
 add_library(QtLlm::Core ALIAS qtllm_core)
+add_library(QtLlm::Diagnostics ALIAS qtllm_diagnostics)
+add_library(QtLlm::Tools ALIAS qtllm_tools)
+add_library(QtLlm::LocalRuntime ALIAS qtllm_local_runtime)
 set_target_properties(qtllm PROPERTIES
     EXPORT_NAME QtLlm
     INTERFACE_INCLUDE_DIRECTORIES "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/qtllm>;$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 set_target_properties(qtllm_core PROPERTIES
     EXPORT_NAME Core
+    INTERFACE_INCLUDE_DIRECTORIES "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/qtllm>;$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+)
+set_target_properties(qtllm_diagnostics PROPERTIES
+    EXPORT_NAME Diagnostics
+    INTERFACE_INCLUDE_DIRECTORIES "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/qtllm>;$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+)
+set_target_properties(qtllm_tools PROPERTIES
+    EXPORT_NAME Tools
+    INTERFACE_INCLUDE_DIRECTORIES "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/qtllm>;$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+)
+set_target_properties(qtllm_local_runtime PROPERTIES
+    EXPORT_NAME LocalRuntime
     INTERFACE_INCLUDE_DIRECTORIES "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/qtllm>;$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
@@ -85,6 +100,7 @@ if(QTLLM_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests/qtllm_tests)
     add_subdirectory(tests/core_component)
+    add_subdirectory(tests/optional_components)
 endif()
 
 if(QT_VERSION_MAJOR EQUAL 6)
@@ -95,6 +111,24 @@ endif()
 
 if(QTLLM_ENABLE_INSTALL)
     install(TARGETS qtllm_core EXPORT QtLlmCoreTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    )
+    install(TARGETS qtllm_diagnostics EXPORT QtLlmDiagnosticsTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    )
+    install(TARGETS qtllm_tools EXPORT QtLlmToolsTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    )
+    install(TARGETS qtllm_local_runtime EXPORT QtLlmLocalRuntimeTargets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
@@ -121,6 +155,21 @@ if(QTLLM_ENABLE_INSTALL)
     )
     install(EXPORT QtLlmCoreTargets
         FILE QtLlmCoreTargets.cmake
+        NAMESPACE QtLlm::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/QtLlm
+    )
+    install(EXPORT QtLlmDiagnosticsTargets
+        FILE QtLlmDiagnosticsTargets.cmake
+        NAMESPACE QtLlm::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/QtLlm
+    )
+    install(EXPORT QtLlmToolsTargets
+        FILE QtLlmToolsTargets.cmake
+        NAMESPACE QtLlm::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/QtLlm
+    )
+    install(EXPORT QtLlmLocalRuntimeTargets
+        FILE QtLlmLocalRuntimeTargets.cmake
         NAMESPACE QtLlm::
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/QtLlm
     )
