@@ -134,9 +134,50 @@ set_target_properties(qtllm_local_runtime PROPERTIES
     WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
 
+set(QTLLM_CONVERSATION_SOURCES)
+set(QTLLM_CONVERSATION_HEADERS
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/qtllmclient.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/toolenabledchatentry.h"
+)
+foreach(_qtllm_conversation_dir chat host profile storage toolsinside toolsstudio)
+    file(GLOB_RECURSE _qtllm_component_sources CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/${_qtllm_conversation_dir}/*.cpp"
+    )
+    file(GLOB_RECURSE _qtllm_component_headers CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/${_qtllm_conversation_dir}/*.h"
+    )
+    list(APPEND QTLLM_CONVERSATION_SOURCES ${_qtllm_component_sources})
+    list(APPEND QTLLM_CONVERSATION_HEADERS ${_qtllm_component_headers})
+endforeach()
+list(APPEND QTLLM_CONVERSATION_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/qtllmclient.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/toolenabledchatentry.cpp"
+)
+
+add_library(qtllm_conversation ${QTLLM_LIBRARY_TYPE}
+    ${QTLLM_CONVERSATION_SOURCES}
+    ${QTLLM_CONVERSATION_HEADERS}
+)
+add_library(qtllm::conversation ALIAS qtllm_conversation)
+target_include_directories(qtllm_conversation PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_definitions(qtllm_conversation PRIVATE QTLLM_LIBRARY)
+target_link_libraries(qtllm_conversation
+    PUBLIC
+    qtllm_core
+    qtllm_diagnostics
+    qtllm_tools
+    qtllm_local_runtime
+    Qt${QT_VERSION_MAJOR}::Core
+    Qt${QT_VERSION_MAJOR}::Network
+    Qt${QT_VERSION_MAJOR}::Sql
+)
+set_target_properties(qtllm_conversation PROPERTIES
+    OUTPUT_NAME qtllm_conversation
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
+)
+
 add_library(qtllm ${QTLLM_LIBRARY_TYPE}
-    ${QTLLM_CORE_SOURCES}
-    ${QTLLM_CORE_HEADERS}
+    compatibility/qtllmcompatibility.cpp
 )
 
 add_library(qtllm::qtllm ALIAS qtllm)
@@ -153,6 +194,7 @@ target_compile_definitions(qtllm
 
 target_link_libraries(qtllm
     PUBLIC
+    qtllm_conversation
     Qt${QT_VERSION_MAJOR}::Core
     Qt${QT_VERSION_MAJOR}::Network
     Qt${QT_VERSION_MAJOR}::Sql

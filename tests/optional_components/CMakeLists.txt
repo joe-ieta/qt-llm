@@ -9,3 +9,7 @@ add_test(NAME qtllm_tools_component_test COMMAND qtllm_tools_component_test)
 add_executable(qtllm_local_runtime_component_test local_runtime_main.cpp)
 target_link_libraries(qtllm_local_runtime_component_test PRIVATE QtLlm::LocalRuntime)
 add_test(NAME qtllm_local_runtime_component_test COMMAND qtllm_local_runtime_component_test)
+
+add_executable(qtllm_conversation_component_test conversation_main.cpp)
+target_link_libraries(qtllm_conversation_component_test PRIVATE QtLlm::Conversation)
+add_test(NAME qtllm_conversation_component_test COMMAND qtllm_conversation_component_test)
