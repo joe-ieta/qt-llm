@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../../qtllm/tools/mcp/mcp_types.h"
+#include <tools/mcp/mcp_types.h>
 
 #include <QDialog>
 

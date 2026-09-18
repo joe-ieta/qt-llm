@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../../../../qtllm/tools/mcp/defaultmcpclient.h"
-#include "../../../../qtllm/tools/mcp/mcpservermanager.h"
+#include <tools/mcp/defaultmcpclient.h>
+#include <tools/mcp/mcpservermanager.h>
 
 #include <memory>
 #include <optional>

@@ -1,29 +1,24 @@
 ﻿#include "multiclientwindow.h"
 
-#include "../../qtllm/chat/conversationclient.h"
-#include "../../qtllm/chat/conversationclientfactory.h"
-#include "../../qtllm/core/llmconfig.h"
-#include "../../qtllm/core/llmtypes.h"
-#include "../../qtllm/logging/logtypes.h"
-#include "../../qtllm/logging/qtllmlogger.h"
-#include "../../qtllm/logging/signallogsink.h"
-#include "../../qtllm/profile/clientprofile.h"
-#include "../../qtllm/providers/illmprovider.h"
-#include "../../qtllm/providers/llamacppprovider.h"
-#include "../../qtllm/providers/ollamaprovider.h"
-#include "../../qtllm/providers/openaiprovider.h"
-#include "../../qtllm/providers/openaicompatibleprovider.h"
-#include "../../qtllm/providers/vllmprovider.h"
-#include "../../qtllm/runtime/managedllamacppruntime.h"
-#include "../../qtllm/storage/conversationrepository.h"
-#include "../../qtllm/tools/builtintools.h"
-#include "../../qtllm/tools/llmtoolregistry.h"
-#include "../../qtllm/tools/toolenabledchatentry.h"
-#include "../../qtllm/tools/runtime/clienttoolpolicyrepository.h"
-#include "../../qtllm/tools/runtime/toolcatalogrepository.h"
-#include "../../qtllm/tools/runtime/toolruntime_types.h"
-#include "../../qtllm/tools/mcp/mcpservermanager.h"
-#include "../../qtllm/tools/mcp/mcptoolsyncservice.h"
+#include <chat/conversationclient.h>
+#include <chat/conversationclientfactory.h>
+#include <core/llmconfig.h>
+#include <core/llmtypes.h>
+#include <host/runtimefacade.h>
+#include <host/runtimeprofile.h>
+#include <logging/logtypes.h>
+#include <logging/qtllmlogger.h>
+#include <logging/signallogsink.h>
+#include <profile/clientprofile.h>
+#include <storage/conversationrepository.h>
+#include <tools/builtintools.h>
+#include <tools/llmtoolregistry.h>
+#include <tools/toolenabledchatentry.h>
+#include <tools/runtime/clienttoolpolicyrepository.h>
+#include <tools/runtime/toolcatalogrepository.h>
+#include <tools/runtime/toolruntime_types.h>
+#include <tools/mcp/mcpservermanager.h>
+#include <tools/mcp/mcptoolsyncservice.h>
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -85,21 +80,12 @@ const ProviderOption *findProviderOption(const QString &providerId)
     return nullptr;
 }
 
-std::unique_ptr<qtllm::ILLMProvider> createProviderById(const QString &providerId)
+bool isManagedLlamaCppProvider(const QString &providerId)
 {
-    if (qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(providerId)) {
-        return std::make_unique<qtllm::LlamaCppProvider>();
-    }
-    if (providerId == QStringLiteral("ollama")) {
-        return std::make_unique<qtllm::OllamaProvider>();
-    }
-    if (providerId == QStringLiteral("vllm")) {
-        return std::make_unique<qtllm::VllmProvider>();
-    }
-    if (providerId == QStringLiteral("openai")) {
-        return std::make_unique<qtllm::OpenAIProvider>();
-    }
-    return std::make_unique<qtllm::OpenAICompatibleProvider>();
+    const QString provider = providerId.trimmed().toLower();
+    return provider == QStringLiteral("llama-cpp")
+        || provider == QStringLiteral("llamacpp")
+        || provider == QStringLiteral("llama-cpp-local");
 }
 
 QUrl buildModelsUrl(const QString &baseUrl)
@@ -183,6 +169,7 @@ MultiClientWindow::MultiClientWindow(QWidget *parent)
     , m_mcpToolSyncService(std::make_shared<qtllm::tools::mcp::McpToolSyncService>(m_toolRegistry, m_mcpServerManager ? m_mcpServerManager->registry() : nullptr))
     , m_logSink(std::make_shared<qtllm::logging::SignalLogSink>())
     , m_toolEntry(nullptr)
+    , m_localRuntime(new qtllm::host::RuntimeFacade(this))
     , m_clientList(new QListWidget(this))
     , m_newClientButton(new QPushButton(QStringLiteral("New Client"), this))
     , m_sessionList(new QListWidget(this))
@@ -629,24 +616,33 @@ bool MultiClientWindow::applyConfigToActiveClient(bool showMessage)
     config.apiKey = apiKey;
     config.model = modelId;
     config.stream = true;
-    if (qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(config.providerName)) {
+    if (isManagedLlamaCppProvider(config.providerName)) {
         config.runtimeName = QStringLiteral("llama-cpp-managed");
         const QString modelPath = m_modelCombo->currentData().toString();
         if (!modelPath.isEmpty()) {
             config.llamaCppModelPath = modelPath;
         }
-        QString availabilityMessage;
-        qtllm::runtime::ManagedLlamaCppRuntime::updateRuntimeAvailability(&config, nullptr, &availabilityMessage);
-        if (!config.providerAvailable) {
+
+        qtllm::host::RuntimeProfile profile;
+        profile.providerName = providerId;
+        profile.llamaCppModelPath = config.llamaCppModelPath;
+        m_localRuntime->setProfile(profile);
+        if (!m_localRuntime->profile().providerAvailable) {
             if (showMessage) {
-                m_output->append(QStringLiteral("[config] ") + availabilityMessage);
+                m_output->append(QStringLiteral("[config] ")
+                                 + m_localRuntime->profile().providerAvailabilityMessage);
             }
             return false;
         }
     }
 
     client->setConfig(config);
-    client->setProvider(createProviderById(providerId));
+    if (!client->setProviderByName(providerId)) {
+        if (showMessage) {
+            m_output->append(QStringLiteral("[config] Unsupported provider: ") + providerId);
+        }
+        return false;
+    }
     return true;
 }
 
@@ -665,29 +661,32 @@ void MultiClientWindow::refreshModels()
         return;
     }
 
-    if (qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(providerId)) {
-        qtllm::runtime::LlamaCppRuntimeLayout layout;
-        QString errorMessage;
-        qtllm::LlmConfig config;
-        config.providerName = providerId;
+    if (isManagedLlamaCppProvider(providerId)) {
         const QString previousModel = m_modelCombo->currentText();
         const QString previousModelPath = m_modelCombo->currentData().toString();
-        const QList<qtllm::runtime::LlamaCppLocalModel> models =
-            qtllm::runtime::ManagedLlamaCppRuntime::listLocalModels(config, &layout, &errorMessage);
+
+        qtllm::host::RuntimeProfile profile;
+        profile.providerName = providerId;
+        m_localRuntime->setProfile(profile);
+
+        QString errorMessage;
+        const QList<qtllm::host::LocalModelInfo> models = m_localRuntime->listLocalModels(&errorMessage);
         if (!errorMessage.isEmpty()) {
             m_modelCombo->clear();
             m_output->append(QStringLiteral("[models] ") + errorMessage);
             return;
         }
-        if (!layout.executableAvailable) {
-            m_output->append(QStringLiteral("[models] ") + layout.availabilityMessage);
-        }
+
         m_modelCombo->clear();
-        for (const qtllm::runtime::LlamaCppLocalModel &model : models) {
+        QString runtimeRoot;
+        for (const qtllm::host::LocalModelInfo &model : models) {
             m_modelCombo->addItem(model.displayName, model.filePath);
+            if (runtimeRoot.isEmpty()) {
+                runtimeRoot = model.runtimeRoot;
+            }
         }
         if (m_modelCombo->count() == 0) {
-            m_output->append(QStringLiteral("[models] No GGUF models found in ") + layout.modelsDir);
+            m_output->append(QStringLiteral("[models] No GGUF models found"));
             return;
         }
         int previousIndex = previousModelPath.isEmpty() ? -1 : m_modelCombo->findData(previousModelPath);
@@ -695,9 +694,11 @@ void MultiClientWindow::refreshModels()
             previousIndex = m_modelCombo->findText(previousModel);
         }
         m_modelCombo->setCurrentIndex(previousIndex >= 0 ? previousIndex : 0);
-        m_output->append(QStringLiteral("[models] Loaded %1 local GGUF model(s) from %2")
+        m_output->append(QStringLiteral("[models] Loaded %1 local GGUF model(s)%2")
                              .arg(m_modelCombo->count())
-                             .arg(layout.modelsDir));
+                             .arg(runtimeRoot.isEmpty()
+                                      ? QString()
+                                      : QStringLiteral(" from ") + runtimeRoot));
         return;
     }
 

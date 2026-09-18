@@ -1,6 +1,6 @@
 #include "mcpserverdiscoveryservice.h"
 
-#include "../../qtllm/tools/mcp/mcpserverregistry.h"
+#include <tools/mcp/mcpserverregistry.h>
 
 #include <algorithm>
 #include <QDir>

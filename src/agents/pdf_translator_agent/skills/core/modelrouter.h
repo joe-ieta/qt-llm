@@ -2,7 +2,7 @@
 
 #include "skilltypes.h"
 
-#include "../../../../qtllm/core/llmconfig.h"
+#include <core/llmconfig.h>
 
 #include <QHash>
 #include <QString>

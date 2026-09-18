@@ -2,7 +2,7 @@
 
 #include "mcpscanlocationrepository.h"
 
-#include "../../qtllm/tools/mcp/defaultmcpclient.h"
+#include <tools/mcp/defaultmcpclient.h>
 
 #include <QHash>
 #include <QString>

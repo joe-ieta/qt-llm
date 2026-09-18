@@ -1,18 +1,19 @@
 #include "mcpchatwindow.h"
 
-#include "../../qtllm/chat/conversationclient.h"
-#include "../../qtllm/core/llmconfig.h"
-#include "../../qtllm/logging/qtllmlogger.h"
-#include "../../qtllm/logging/signallogsink.h"
-#include "../../qtllm/logging/logtypes.h"
-#include "../../qtllm/runtime/managedllamacppruntime.h"
-#include "../../qtllm/tools/llmtooldefinition.h"
-#include "../../qtllm/tools/llmtoolregistry.h"
-#include "../../qtllm/tools/toolenabledchatentry.h"
-#include "../../qtllm/tools/mcp/mcptoolsyncservice.h"
-#include "../../qtllm/tools/runtime/toolexecutionlayer.h"
-#include "../../qtllm/tools/runtime/toolruntimehooks.h"
-#include "../../qtllm/tools/runtime/toolruntime_types.h"
+#include <chat/conversationclient.h>
+#include <core/llmconfig.h>
+#include <host/runtimefacade.h>
+#include <host/runtimeprofile.h>
+#include <logging/qtllmlogger.h>
+#include <logging/signallogsink.h>
+#include <logging/logtypes.h>
+#include <tools/llmtooldefinition.h>
+#include <tools/llmtoolregistry.h>
+#include <tools/toolenabledchatentry.h>
+#include <tools/mcp/mcptoolsyncservice.h>
+#include <tools/runtime/toolexecutionlayer.h>
+#include <tools/runtime/toolruntimehooks.h>
+#include <tools/runtime/toolruntime_types.h>
 
 #include <QComboBox>
 #include <QFormLayout>
@@ -35,12 +36,20 @@
 
 namespace {
 
-QString defaultBaseUrlForProvider(const QString &provider)
+bool isManagedLlamaCppProvider(const QString &provider)
 {
     const QString normalized = provider.trimmed().toLower();
-    if (qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(normalized)) {
-        return qtllm::runtime::ManagedLlamaCppRuntime::defaultBaseUrl();
+    return normalized == QStringLiteral("llama-cpp")
+        || normalized == QStringLiteral("llamacpp")
+        || normalized == QStringLiteral("llama-cpp-local");
+}
+
+QString defaultBaseUrlForProvider(const QString &provider)
+{
+    if (isManagedLlamaCppProvider(provider)) {
+        return QStringLiteral("http://127.0.0.1:18080/v1");
     }
+    const QString normalized = provider.trimmed().toLower();
     if (normalized == QStringLiteral("ollama")) {
         return QStringLiteral("http://127.0.0.1:11434/v1");
     }
@@ -174,6 +183,7 @@ McpChatWindow::McpChatWindow(std::shared_ptr<qtllm::tools::mcp::McpServerManager
     , m_logSink(std::make_shared<qtllm::logging::SignalLogSink>())
     , m_conversationClient(QSharedPointer<qtllm::chat::ConversationClient>::create(
           QStringLiteral("mcp-chat-") + QUuid::createUuid().toString(QUuid::WithoutBraces)))
+    , m_localRuntime(new qtllm::host::RuntimeFacade(this))
     , m_providerCombo(new QComboBox(this))
     , m_baseUrlEdit(new QLineEdit(this))
     , m_apiKeyEdit(new QLineEdit(this))
@@ -619,7 +629,7 @@ bool McpChatWindow::applyChatConfig(bool logResult)
         m_baseUrlEdit->setText(baseUrl);
     }
 
-    if (model.isEmpty() && qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(provider)) {
+    if (model.isEmpty() && isManagedLlamaCppProvider(provider)) {
         refreshLocalModelList();
         model = m_modelCombo->currentText().trimmed();
         modelPath = selectedModelPath(m_modelCombo);
@@ -638,7 +648,7 @@ bool McpChatWindow::applyChatConfig(bool logResult)
     config.apiKey = m_apiKeyEdit->text().trimmed();
     config.model = model;
     config.stream = true;
-    if (qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(provider)) {
+    if (isManagedLlamaCppProvider(provider)) {
         config.runtimeName = QStringLiteral("llama-cpp-managed");
         if (!modelPath.isEmpty()) {
             config.llamaCppModelPath = modelPath;
@@ -677,20 +687,19 @@ bool McpChatWindow::applyChatConfig(bool logResult)
 void McpChatWindow::refreshLocalModelList()
 {
     const QString provider = m_providerCombo->currentText().trimmed();
-    if (!qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(provider)) {
+    if (!isManagedLlamaCppProvider(provider)) {
         return;
     }
 
     const QString previousModel = m_modelCombo->currentText();
     const QString previousModelPath = m_modelCombo->currentData().toString();
 
-    qtllm::LlmConfig config;
-    config.providerName = provider;
+    qtllm::host::RuntimeProfile profile;
+    profile.providerName = provider;
+    m_localRuntime->setProfile(profile);
 
-    qtllm::runtime::LlamaCppRuntimeLayout layout;
     QString errorMessage;
-    const QList<qtllm::runtime::LlamaCppLocalModel> models =
-        qtllm::runtime::ManagedLlamaCppRuntime::listLocalModels(config, &layout, &errorMessage);
+    const QList<qtllm::host::LocalModelInfo> models = m_localRuntime->listLocalModels(&errorMessage);
 
     m_modelCombo->clear();
     if (!errorMessage.isEmpty()) {
@@ -698,8 +707,12 @@ void McpChatWindow::refreshLocalModelList()
         return;
     }
 
-    for (const qtllm::runtime::LlamaCppLocalModel &model : models) {
+    QString runtimeRoot;
+    for (const qtllm::host::LocalModelInfo &model : models) {
         m_modelCombo->addItem(model.displayName, model.filePath);
+        if (runtimeRoot.isEmpty()) {
+            runtimeRoot = model.runtimeRoot;
+        }
     }
 
     int previousIndex = previousModelPath.isEmpty() ? -1 : m_modelCombo->findData(previousModelPath);
@@ -714,7 +727,7 @@ void McpChatWindow::refreshLocalModelList()
 
     logInfo(QStringLiteral("ui.mcp.chat"),
             QStringLiteral("Local llama.cpp model list refreshed"),
-            QJsonObject{{QStringLiteral("modelsDir"), layout.modelsDir},
+            QJsonObject{{QStringLiteral("runtimeRoot"), runtimeRoot},
                         {QStringLiteral("modelCount"), m_modelCombo->count()}});
 }
 

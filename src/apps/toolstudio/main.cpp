@@ -1,6 +1,6 @@
 #include "toolstudiowindow.h"
 
-#include "../../qtllm/host/managedllamacppappbootstrap.h"
+#include <host/managedllamacppappbootstrap.h>
 
 #include <QApplication>
 

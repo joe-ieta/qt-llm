@@ -9,10 +9,11 @@
 #include "../storage/manifestrepository.h"
 #include "../viewer/comparereaderwidget.h"
 
-#include "../../../qtllm/identity/compactid.h"
-#include "../../../qtllm/core/llmtypes.h"
-#include "../../../qtllm/core/qtllmclient.h"
-#include "../../../qtllm/runtime/managedllamacppruntime.h"
+#include <identity/compactid.h>
+#include <core/llmtypes.h>
+#include <core/qtllmclient.h>
+#include <host/runtimefacade.h>
+#include <host/runtimeprofile.h>
 
 #include <QApplication>
 #include <QComboBox>
@@ -50,12 +51,20 @@ namespace pdftranslator {
 
 namespace {
 
-QString defaultBaseUrlForProvider(const QString &provider)
+bool isManagedLlamaCppProvider(const QString &provider)
 {
     const QString normalized = provider.trimmed().toLower();
-    if (qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(normalized)) {
-        return qtllm::runtime::ManagedLlamaCppRuntime::defaultBaseUrl();
+    return normalized == QStringLiteral("llama-cpp")
+        || normalized == QStringLiteral("llamacpp")
+        || normalized == QStringLiteral("llama-cpp-local");
+}
+
+QString defaultBaseUrlForProvider(const QString &provider)
+{
+    if (isManagedLlamaCppProvider(provider)) {
+        return QStringLiteral("http://127.0.0.1:18080/v1");
     }
+    const QString normalized = provider.trimmed().toLower();
     if (normalized == QStringLiteral("ollama")) {
         return QStringLiteral("http://127.0.0.1:11434/v1");
     }
@@ -197,6 +206,7 @@ MainWindow::MainWindow(const std::shared_ptr<skills::SkillRegistry> &skillRegist
     , m_skillRegistry(skillRegistry)
     , m_modelRouter(modelRouter)
     , m_mcpGateway(mcpGateway)
+    , m_runtime(new qtllm::host::RuntimeFacade(this))
     , m_workflowController(std::make_unique<pipeline::DocumentWorkflowController>(skillRegistry, modelRouter))
     , m_batchQueueController(std::make_unique<pipeline::BatchTranslationQueueController>(skillRegistry, modelRouter))
 {
@@ -1185,32 +1195,32 @@ void MainWindow::refreshFragmentHistoryView()
 
 void MainWindow::refreshLlamaCppModelList(QComboBox *modelCombo, const QString &provider)
 {
-    if (!modelCombo || !qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(provider)) {
+    if (!modelCombo || !isManagedLlamaCppProvider(provider)) {
         return;
     }
 
     const QString previousModel = modelCombo->currentText();
     const QString previousModelPath = modelCombo->currentData().toString();
 
-    qtllm::LlmConfig config;
-    config.providerName = provider;
+    qtllm::host::RuntimeProfile profile;
+    profile.providerName = provider;
+    m_runtime->setProfile(profile);
 
-    qtllm::runtime::LlamaCppRuntimeLayout layout;
     QString errorMessage;
-    const QList<qtllm::runtime::LlamaCppLocalModel> models =
-        qtllm::runtime::ManagedLlamaCppRuntime::listLocalModels(config, &layout, &errorMessage);
+    const QList<qtllm::host::LocalModelInfo> models = m_runtime->listLocalModels(&errorMessage);
 
     modelCombo->clear();
     if (!errorMessage.isEmpty()) {
         m_statusLabel->setText(errorMessage);
         return;
     }
-    if (!layout.executableAvailable) {
-        m_statusLabel->setText(layout.availabilityMessage);
-    }
 
-    for (const qtllm::runtime::LlamaCppLocalModel &model : models) {
+    QString runtimeRoot;
+    for (const qtllm::host::LocalModelInfo &model : models) {
         modelCombo->addItem(model.displayName, model.filePath);
+        if (runtimeRoot.isEmpty()) {
+            runtimeRoot = model.runtimeRoot;
+        }
     }
 
     int previousIndex = previousModelPath.isEmpty() ? -1 : modelCombo->findData(previousModelPath);
@@ -1223,14 +1233,17 @@ void MainWindow::refreshLlamaCppModelList(QComboBox *modelCombo, const QString &
         modelCombo->setCurrentIndex(0);
     }
 
-    if (!layout.executableAvailable) {
-        m_statusLabel->setText(layout.availabilityMessage);
-    } else if (models.isEmpty()) {
-        m_statusLabel->setText(QStringLiteral("No GGUF models found in %1").arg(layout.modelsDir));
+    if (models.isEmpty()) {
+        const QString availability = m_runtime->profile().providerAvailabilityMessage;
+        m_statusLabel->setText(availability.isEmpty()
+                                   ? QStringLiteral("No local GGUF models found")
+                                   : availability);
     } else {
-        m_statusLabel->setText(QStringLiteral("Loaded %1 local GGUF model(s) from %2")
+        m_statusLabel->setText(QStringLiteral("Loaded %1 local GGUF model(s)%2")
                                    .arg(models.size())
-                                   .arg(layout.modelsDir));
+                                   .arg(runtimeRoot.isEmpty()
+                                            ? QString()
+                                            : QStringLiteral(" from ") + runtimeRoot));
     }
 }
 
@@ -1247,7 +1260,7 @@ void MainWindow::applyLanguageDetectBinding()
     endpoint.llmConfig.baseUrl = m_baseUrlEdit->text().trimmed();
     endpoint.llmConfig.apiKey = m_apiKeyEdit->text().trimmed();
     endpoint.llmConfig.model = m_modelCombo->currentText().trimmed();
-    if (qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(endpoint.llmConfig.providerName)) {
+    if (isManagedLlamaCppProvider(endpoint.llmConfig.providerName)) {
         endpoint.llmConfig.runtimeName = QStringLiteral("llama-cpp-managed");
         QString modelPath = selectedModelPath(m_modelCombo);
         if (endpoint.llmConfig.model.isEmpty()) {
@@ -1258,10 +1271,14 @@ void MainWindow::applyLanguageDetectBinding()
         if (!modelPath.isEmpty()) {
             endpoint.llmConfig.llamaCppModelPath = modelPath;
         }
-        QString availabilityMessage;
-        qtllm::runtime::ManagedLlamaCppRuntime::updateRuntimeAvailability(&endpoint.llmConfig, nullptr, &availabilityMessage);
+
+        qtllm::host::RuntimeProfile profile;
+        profile.providerName = endpoint.llmConfig.providerName;
+        profile.llamaCppModelPath = endpoint.llmConfig.llamaCppModelPath;
+        m_runtime->setProfile(profile);
+        endpoint.llmConfig.providerAvailable = m_runtime->profile().providerAvailable;
         if (!endpoint.llmConfig.providerAvailable) {
-            m_statusLabel->setText(availabilityMessage);
+            m_statusLabel->setText(m_runtime->profile().providerAvailabilityMessage);
         }
     }
     endpoint.llmConfig.stream = false;
@@ -1288,7 +1305,7 @@ void MainWindow::applyTranslateBinding()
     endpoint.llmConfig.baseUrl = m_translateBaseUrlEdit->text().trimmed();
     endpoint.llmConfig.apiKey = m_translateApiKeyEdit->text().trimmed();
     endpoint.llmConfig.model = m_translateModelCombo->currentText().trimmed();
-    if (qtllm::runtime::ManagedLlamaCppRuntime::isManagedProvider(endpoint.llmConfig.providerName)) {
+    if (isManagedLlamaCppProvider(endpoint.llmConfig.providerName)) {
         endpoint.llmConfig.runtimeName = QStringLiteral("llama-cpp-managed");
         QString modelPath = selectedModelPath(m_translateModelCombo);
         if (endpoint.llmConfig.model.isEmpty()) {
@@ -1299,10 +1316,14 @@ void MainWindow::applyTranslateBinding()
         if (!modelPath.isEmpty()) {
             endpoint.llmConfig.llamaCppModelPath = modelPath;
         }
-        QString availabilityMessage;
-        qtllm::runtime::ManagedLlamaCppRuntime::updateRuntimeAvailability(&endpoint.llmConfig, nullptr, &availabilityMessage);
+
+        qtllm::host::RuntimeProfile profile;
+        profile.providerName = endpoint.llmConfig.providerName;
+        profile.llamaCppModelPath = endpoint.llmConfig.llamaCppModelPath;
+        m_runtime->setProfile(profile);
+        endpoint.llmConfig.providerAvailable = m_runtime->profile().providerAvailable;
         if (!endpoint.llmConfig.providerAvailable) {
-            m_statusLabel->setText(availabilityMessage);
+            m_statusLabel->setText(m_runtime->profile().providerAvailabilityMessage);
         }
     }
     endpoint.llmConfig.stream = false;

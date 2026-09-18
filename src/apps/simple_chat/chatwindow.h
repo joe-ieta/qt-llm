@@ -17,6 +17,7 @@ class QEvent;
 namespace qtllm {
 namespace host {
 class RuntimeFacade;
+class RuntimeRequestHandle;
 }
 }
 
@@ -51,8 +52,10 @@ private:
     QLineEdit *m_input;
     QPushButton *m_sendButton;
     qtllm::host::RuntimeFacade *m_runtime;
+    QPointer<qtllm::host::RuntimeRequestHandle> m_activeHandle;
     QNetworkAccessManager *m_networkManager;
     QPointer<QNetworkReply> m_modelsReply;
+    int m_turnStartPosition = 0;
     bool m_reasoningVisible = false;
     bool m_contentVisible = false;
 };

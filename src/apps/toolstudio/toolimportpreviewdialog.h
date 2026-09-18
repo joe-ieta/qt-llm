@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../../qtllm/toolsstudio/toolsstudio_types.h"
+#include <toolsstudio/toolsstudio_types.h>
 
 #include <QDialog>
 

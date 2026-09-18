@@ -1,6 +1,7 @@
 ﻿#include "chatwindow.h"
 
-#include "../../qtllm/host/runtimefacade.h"
+#include <host/runtimefacade.h>
+#include <host/runtimerequesthandle.h>
 
 #include <QComboBox>
 #include <QEvent>
@@ -138,40 +139,9 @@ ChatWindow::ChatWindow(QWidget *parent)
             this, [this](const QString &) { applyConfigToClient(); });
 
     connect(m_sendButton, &QPushButton::clicked, this, &ChatWindow::onSendClicked);
-    connect(m_runtime, &qtllm::host::RuntimeFacade::tokenReceived, this, [this](const QString &token) {
-        m_output->moveCursor(QTextCursor::End);
-        if (m_reasoningVisible && !m_contentVisible) {
-            m_output->insertPlainText(QStringLiteral("\n[answer] "));
-        }
-        m_contentVisible = true;
-        m_output->insertPlainText(token);
-    });
-    connect(m_runtime, &qtllm::host::RuntimeFacade::reasoningTokenReceived, this, [this](const QString &token) {
-        m_output->moveCursor(QTextCursor::End);
-        if (!m_reasoningVisible) {
-            m_output->insertPlainText(QStringLiteral("\n[thinking] "));
-            m_reasoningVisible = true;
-        }
-        m_output->insertPlainText(token);
-    });
-    connect(m_runtime, &qtllm::host::RuntimeFacade::completed, this, [this](const qtllm::host::ChatResult &) {
-        m_output->append(QString());
-        m_output->append(QStringLiteral("--- done ---"));
-        m_reasoningVisible = false;
-        m_contentVisible = false;
-    });
-    connect(m_runtime, &qtllm::host::RuntimeFacade::errorOccurred, this, [this](const qtllm::host::ChatResult &result) {
-        m_output->append(QStringLiteral("[error] ") + result.errorMessage);
-        m_reasoningVisible = false;
-        m_contentVisible = false;
-    });
     connect(m_runtime, &qtllm::host::RuntimeFacade::runtimeStatusChanged,
             this, [this](const QString &status, const QString &detail) {
-        if (status == QStringLiteral("request_started")) {
-            setStatusMessage(QStringLiteral("请求已发送: ") + detail, false);
-        } else if (status == QStringLiteral("completed")) {
-            setStatusMessage(QStringLiteral("请求完成: ") + detail, false);
-        } else if (status == QStringLiteral("provider_available")) {
+        if (status == QStringLiteral("provider_available")) {
             setStatusMessage(detail, false);
         } else if (status == QStringLiteral("provider_unavailable")) {
             setStatusMessage(detail, true);
@@ -273,11 +243,62 @@ void ChatWindow::onSendClicked()
     m_reasoningVisible = false;
     m_contentVisible = false;
     m_output->append(QStringLiteral("\n> ") + prompt);
+    m_turnStartPosition = m_output->textCursor().position();
     m_input->clear();
 
     qtllm::host::ChatRequest request;
     request.userPrompt = prompt;
-    m_runtime->send(request);
+
+    qtllm::host::RuntimeRequestHandle *handle = m_runtime->sendAsync(request);
+    m_activeHandle = handle;
+    m_sendButton->setEnabled(false);
+    setStatusMessage(QStringLiteral("请求已发送"), false);
+
+    connect(handle, &qtllm::host::RuntimeRequestHandle::tokenReceived,
+            this, [this](const QString &, const QString &token) {
+        m_output->moveCursor(QTextCursor::End);
+        if (m_reasoningVisible && !m_contentVisible) {
+            m_output->insertPlainText(QStringLiteral("\n[answer] "));
+        }
+        m_contentVisible = true;
+        m_output->insertPlainText(token);
+    });
+    connect(handle, &qtllm::host::RuntimeRequestHandle::reasoningTokenReceived,
+            this, [this](const QString &, const QString &token) {
+        m_output->moveCursor(QTextCursor::End);
+        if (!m_reasoningVisible) {
+            m_output->insertPlainText(QStringLiteral("\n[thinking] "));
+            m_reasoningVisible = true;
+        }
+        m_output->insertPlainText(token);
+    });
+    connect(handle, &qtllm::host::RuntimeRequestHandle::streamReset,
+            this, [this](const QString &, int) {
+        QTextCursor cursor(m_output->document());
+        cursor.setPosition(m_turnStartPosition);
+        cursor.movePosition(QTextCursor::End, QTextCursor::KeepAnchor);
+        cursor.removeSelectedText();
+        m_reasoningVisible = false;
+        m_contentVisible = false;
+    });
+    connect(handle, &qtllm::host::RuntimeRequestHandle::finished,
+            this, [this, handle](const qtllm::host::ChatResult &result) {
+        if (result.success) {
+            m_output->append(QString());
+            m_output->append(QStringLiteral("--- done ---"));
+            setStatusMessage(QStringLiteral("请求完成"), false);
+        } else if (result.canceled) {
+            setStatusMessage(QStringLiteral("请求已取消"), false);
+        } else {
+            m_output->append(QStringLiteral("[error] ") + result.errorMessage);
+            setStatusMessage(result.errorMessage, true);
+        }
+        m_reasoningVisible = false;
+        m_contentVisible = false;
+        m_activeHandle.clear();
+        validateConfig(false);
+        handle->deleteLater();
+    });
 }
 
 bool ChatWindow::eventFilter(QObject *watched, QEvent *event)

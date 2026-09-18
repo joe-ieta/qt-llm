@@ -1,6 +1,6 @@
 #include "mcpscanlocationrepository.h"
 
-#include "../../qtllm/logging/qtllmlogger.h"
+#include <logging/qtllmlogger.h>
 
 #include <QDir>
 #include <QFile>

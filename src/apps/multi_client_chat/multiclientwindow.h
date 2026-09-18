@@ -1,7 +1,7 @@
 ﻿#pragma once
 
-#include "../../qtllm/chat/conversationclientfactory.h"
-#include "../../qtllm/logging/logtypes.h"
+#include <chat/conversationclientfactory.h>
+#include <logging/logtypes.h>
 
 #include <QMetaObject>
 #include <QPointer>
@@ -12,6 +12,10 @@
 
 namespace qtllm::chat {
 class ConversationClient;
+}
+
+namespace qtllm::host {
+class RuntimeFacade;
 }
 
 namespace qtllm::logging {
@@ -89,6 +93,7 @@ private:
     std::shared_ptr<qtllm::tools::mcp::McpToolSyncService> m_mcpToolSyncService;
     std::shared_ptr<qtllm::logging::SignalLogSink> m_logSink;
     qtllm::tools::ToolEnabledChatEntry *m_toolEntry;
+    qtllm::host::RuntimeFacade *m_localRuntime;
 
     QListWidget *m_clientList;
     QPushButton *m_newClientButton;

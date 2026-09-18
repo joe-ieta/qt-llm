@@ -3,9 +3,9 @@
 #include "manualmcpserverdialog.h"
 #include "mcpchatwindow.h"
 
-#include "../../qtllm/logging/logtypes.h"
-#include "../../qtllm/logging/qtllmlogger.h"
-#include "../../qtllm/logging/signallogsink.h"
+#include <logging/logtypes.h>
+#include <logging/qtllmlogger.h>
+#include <logging/signallogsink.h>
 
 #include <QFileDialog>
 #include <QDir>

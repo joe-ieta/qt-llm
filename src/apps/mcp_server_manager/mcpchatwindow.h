@@ -1,8 +1,8 @@
 ﻿#pragma once
 
-#include "../../qtllm/logging/logtypes.h"
-#include "../../qtllm/tools/mcp/defaultmcpclient.h"
-#include "../../qtllm/tools/mcp/mcpservermanager.h"
+#include <logging/logtypes.h>
+#include <tools/mcp/defaultmcpclient.h>
+#include <tools/mcp/mcpservermanager.h>
 
 #include <QJsonObject>
 #include <QSharedPointer>
@@ -12,6 +12,10 @@
 
 namespace qtllm::chat {
 class ConversationClient;
+}
+
+namespace qtllm::host {
+class RuntimeFacade;
 }
 
 namespace qtllm::logging {
@@ -88,6 +92,7 @@ private:
 
     QSharedPointer<qtllm::chat::ConversationClient> m_conversationClient;
     qtllm::tools::ToolEnabledChatEntry *m_chatEntry = nullptr;
+    qtllm::host::RuntimeFacade *m_localRuntime;
 
     QComboBox *m_providerCombo;
     QLineEdit *m_baseUrlEdit;

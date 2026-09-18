@@ -1,6 +1,6 @@
 #include "mcpgateway.h"
 
-#include "../../../../qtllm/tools/runtime/toolruntime_types.h"
+#include <tools/runtime/toolruntime_types.h>
 
 namespace pdftranslator::skills::mcp {
 

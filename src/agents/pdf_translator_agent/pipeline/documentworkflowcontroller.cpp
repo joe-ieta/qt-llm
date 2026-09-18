@@ -4,7 +4,7 @@
 #include "../skills/core/modelrouter.h"
 #include "../skills/core/skillregistry.h"
 #include "../storage/manifestrepository.h"
-#include "../../../qtllm/identity/compactid.h"
+#include <identity/compactid.h>
 
 #include <QDir>
 #include <QFile>

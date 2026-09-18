@@ -34,6 +34,10 @@ namespace pdftranslator::viewer {
 class CompareReaderWidget;
 }
 
+namespace qtllm::host {
+class RuntimeFacade;
+}
+
 namespace pdftranslator {
 
 class MainWindow : public QWidget
@@ -85,6 +89,7 @@ private:
     std::shared_ptr<skills::SkillRegistry> m_skillRegistry;
     std::shared_ptr<skills::ModelRouter> m_modelRouter;
     std::shared_ptr<skills::mcp::McpGateway> m_mcpGateway;
+    qtllm::host::RuntimeFacade *m_runtime = nullptr;
     std::unique_ptr<pipeline::DocumentWorkflowController> m_workflowController;
     std::unique_ptr<pipeline::BatchTranslationQueueController> m_batchQueueController;
 

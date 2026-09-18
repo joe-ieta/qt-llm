@@ -1,4 +1,4 @@
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Widgets Network Sql)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Widgets Network)
 
 file(GLOB_RECURSE MCP_SERVER_MANAGER_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
@@ -17,17 +17,11 @@ add_executable(mcp_server_manager
     ${MCP_SERVER_MANAGER_HEADERS}
 )
 
-target_include_directories(mcp_server_manager
-    PRIVATE
-    "${PROJECT_SOURCE_DIR}/src/qtllm"
-)
-
 target_link_libraries(mcp_server_manager
     PRIVATE
-    qtllm
+    QtLlm::Conversation
     Qt${QT_VERSION_MAJOR}::Core
     Qt${QT_VERSION_MAJOR}::Gui
     Qt${QT_VERSION_MAJOR}::Widgets
     Qt${QT_VERSION_MAJOR}::Network
-    Qt${QT_VERSION_MAJOR}::Sql
 )

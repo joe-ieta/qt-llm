@@ -1,6 +1,6 @@
 #include "toolsinsidebrowser.h"
 
-#include "../../qtllm/host/managedllamacppappbootstrap.h"
+#include <host/managedllamacppappbootstrap.h>
 
 #include <QApplication>
 #include <QCoreApplication>

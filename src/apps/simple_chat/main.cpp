@@ -1,6 +1,6 @@
 #include "chatwindow.h"
 
-#include "../../qtllm/host/managedllamacppappbootstrap.h"
+#include <host/managedllamacppappbootstrap.h>
 
 #include <QApplication>
 #include <QLoggingCategory>

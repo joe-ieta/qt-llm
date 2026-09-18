@@ -1,11 +1,11 @@
 #include "toolsinsidebrowser.h"
 
-#include "../../qtllm/toolsinside/toolsinsideadminservice.h"
-#include "../../qtllm/toolsinside/toolsinsideartifactstore.h"
-#include "../../qtllm/toolsinside/toolsinsidei18n.h"
-#include "../../qtllm/toolsinside/toolsinsidequeryservice.h"
-#include "../../qtllm/toolsinside/toolsinsideruntime.h"
-#include "../../qtllm/identity/compactid.h"
+#include <toolsinside/toolsinsideadminservice.h>
+#include <toolsinside/toolsinsideartifactstore.h>
+#include <toolsinside/toolsinsidei18n.h>
+#include <toolsinside/toolsinsidequeryservice.h>
+#include <toolsinside/toolsinsideruntime.h>
+#include <identity/compactid.h>
 
 #include <QDateTime>
 #include <QDir>

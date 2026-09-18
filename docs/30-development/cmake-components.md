@@ -45,6 +45,8 @@ target_link_libraries(my_app PRIVATE
 )
 ```
 
+仓库内示例 App 与参考 Agent 同样使用正式目标集成：它们只链接 `QtLlm::Conversation` 等组件目标，并通过 `<host/...>`、`<chat/...>`、`<tools/...>` 等公开头文件路径包含，不再引用 `src/qtllm` 源目录或聚合目标，可作为组件式集成的参考。
+
 ## 静态与共享构建
 
 `QTLLM_LIBRARY_TYPE` 接受 `STATIC` 或 `SHARED`，默认值为 `STATIC`，因此现有构建和产物名称不变：

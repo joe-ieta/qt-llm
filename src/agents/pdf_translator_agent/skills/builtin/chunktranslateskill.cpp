@@ -2,8 +2,8 @@
 
 #include "../core/modelrouter.h"
 
-#include "../../../../qtllm/core/llmtypes.h"
-#include "../../../../qtllm/core/qtllmclient.h"
+#include <core/llmtypes.h>
+#include <core/qtllmclient.h>
 
 #include <QEventLoop>
 #include <QTimer>

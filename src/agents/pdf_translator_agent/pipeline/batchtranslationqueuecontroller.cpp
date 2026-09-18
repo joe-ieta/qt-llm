@@ -1,7 +1,7 @@
 #include "batchtranslationqueuecontroller.h"
 
 #include "documentworkflowcontroller.h"
-#include "../../../qtllm/identity/compactid.h"
+#include <identity/compactid.h>
 
 #include <QFileInfo>
 #include <QJsonArray>

@@ -1,10 +1,10 @@
 #pragma once
 
-#include "../../qtllm/toolsstudio/toolcatalogservice.h"
-#include "../../qtllm/toolsstudio/toolimportexportservice.h"
-#include "../../qtllm/toolsstudio/toolmergeservice.h"
-#include "../../qtllm/toolsstudio/toolstudiosettings.h"
-#include "../../qtllm/toolsstudio/toolworkspaceservice.h"
+#include <toolsstudio/toolcatalogservice.h>
+#include <toolsstudio/toolimportexportservice.h>
+#include <toolsstudio/toolmergeservice.h>
+#include <toolsstudio/toolstudiosettings.h>
+#include <toolsstudio/toolworkspaceservice.h>
 
 #include <QObject>
 #include <memory>

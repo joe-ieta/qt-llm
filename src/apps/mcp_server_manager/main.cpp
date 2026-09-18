@@ -1,8 +1,8 @@
 #include "mcpservermanagerwindow.h"
 
-#include "../../qtllm/host/managedllamacppappbootstrap.h"
-#include "../../qtllm/logging/logtypes.h"
-#include "../../qtllm/logging/qtllmlogger.h"
+#include <host/managedllamacppappbootstrap.h>
+#include <logging/logtypes.h>
+#include <logging/qtllmlogger.h>
 
 #include <QApplication>
 #include <QLoggingCategory>
