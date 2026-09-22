@@ -23,6 +23,11 @@ struct LlmMessage
     QString role;
     QString content;
 
+    // Thinking/reasoning channel text (DeepSeek reasoning_content and similar).
+    // Providers that use a thinking mode require it to be passed back on
+    // assistant tool-call turns.
+    QString reasoningContent;
+
     // Optional fields for tool-calling protocol.
     QString name;
     QString toolCallId;

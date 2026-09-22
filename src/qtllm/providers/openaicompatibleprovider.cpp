@@ -376,6 +376,12 @@ QJsonObject toOpenAiMessage(const LlmMessage &message)
         obj.insert(QStringLiteral("content"), message.content);
     }
 
+    // Thinking-mode models (DeepSeek V4/R1, Qwen, ...) require the assistant
+    // reasoning channel to be passed back, especially on tool-call turns.
+    if (role == QStringLiteral("assistant") && !message.reasoningContent.isEmpty()) {
+        obj.insert(QStringLiteral("reasoning_content"), message.reasoningContent);
+    }
+
     if (!message.name.trimmed().isEmpty()) {
         obj.insert(QStringLiteral("name"), message.name);
     }
@@ -676,6 +682,7 @@ LlmResponse parseOpenAiResponse(const QJsonObject &root)
 
     appendToolCallsToAssistant(pendingCalls, assistant);
 
+    assistant.reasoningContent = reasoningText;
     response.assistantMessage = assistant;
     response.text = !assistant.content.isEmpty() ? assistant.content : reasoningText;
 
@@ -1014,6 +1021,7 @@ LlmResponse OpenAICompatibleProvider::parseResponse(const QByteArray &data) cons
             response.assistantMessage.content = !state.contentParts.isEmpty()
                 ? state.contentParts.join(QString())
                 : state.reasoningParts.join(QString());
+            response.assistantMessage.reasoningContent = state.reasoningParts.join(QString());
             response.text = response.assistantMessage.content;
             appendToolCallsToAssistant(state.toolCalls, response.assistantMessage);
             response.success = !response.text.isEmpty() || !response.assistantMessage.toolCalls.isEmpty();
@@ -1129,6 +1137,7 @@ LlmResponse OpenAICompatibleProvider::parseResponse(const QByteArray &data) cons
             response.assistantMessage.content = !state.contentParts.isEmpty()
                 ? state.contentParts.join(QString())
                 : state.reasoningParts.join(QString());
+            response.assistantMessage.reasoningContent = state.reasoningParts.join(QString());
             response.text = response.assistantMessage.content;
             appendToolCallsToAssistant(state.toolCalls, response.assistantMessage);
             response.success = !response.text.isEmpty() || !response.assistantMessage.toolCalls.isEmpty();
