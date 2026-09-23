@@ -1174,6 +1174,56 @@ void QtLlmCoreTests::openAiCompatibleParseResponse()
     QVERIFY(!bad.errorMessage.isEmpty());
 }
 
+void QtLlmCoreTests::openAiCompatibleUsageReportsAvailability()
+{
+    OpenAICompatibleProvider provider;
+
+    const QByteArray withoutUsage = R"({"choices":[{"message":{"content":"ok"}}]})";
+    const LlmResponse unknown = provider.parseResponse(withoutUsage);
+    QVERIFY(unknown.success);
+    QVERIFY(!unknown.usage.available);
+    QCOMPARE(unknown.usage.inputTokens, 0);
+
+    const QByteArray withUsage = R"({
+      "choices":[{"message":{"content":"ok"}}],
+      "usage":{
+        "prompt_tokens":11,
+        "completion_tokens":7,
+        "total_tokens":18,
+        "prompt_tokens_details":{"cached_tokens":3},
+        "completion_tokens_details":{"reasoning_tokens":5}
+      }
+    })";
+    const LlmResponse reported = provider.parseResponse(withUsage);
+    QVERIFY(reported.success);
+    QVERIFY(reported.usage.available);
+    QCOMPARE(reported.usage.inputTokens, 11);
+    QCOMPARE(reported.usage.outputTokens, 7);
+    QCOMPARE(reported.usage.totalTokens, 18);
+    QCOMPARE(reported.usage.reasoningTokens, 5);
+    QCOMPARE(reported.usage.cachedInputTokens, 3);
+
+    const QByteArray zeroUsage = R"({
+      "choices":[{"message":{"content":"ok"}}],
+      "usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}
+    })";
+    const LlmResponse zero = provider.parseResponse(zeroUsage);
+    QVERIFY(zero.success);
+    QVERIFY(zero.usage.available);
+    QCOMPARE(zero.usage.totalTokens, 0);
+
+    const QByteArray stream =
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n"
+        "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":2,\"total_tokens\":6}}\n\n"
+        "data: [DONE]\n\n";
+    const LlmResponse streamed = provider.parseResponse(stream);
+    QVERIFY(streamed.success);
+    QVERIFY(streamed.usage.available);
+    QCOMPARE(streamed.usage.inputTokens, 4);
+    QCOMPARE(streamed.usage.outputTokens, 2);
+    QCOMPARE(streamed.usage.totalTokens, 6);
+}
+
 void QtLlmCoreTests::openAiCompatibleParseAnthropicResponse()
 {
     OpenAICompatibleProvider provider;

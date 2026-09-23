@@ -54,7 +54,7 @@ target_link_libraries(my_app PRIVATE QtLlm::Core QtLlm::Diagnostics)
 - `canceled`：是否由取消结束。
 - `requestId`：请求关联 ID。
 - `error`：结构化类别、错误码、诊断和可重试信息。
-- `response`：底层 `LlmResponse`，包含助手消息、结束原因、结构化输出和 Provider 用量（`usage`）。
+- `response`：底层 `LlmResponse`，包含助手消息、结束原因、结构化输出和 Provider 用量（`usage`；先检查 `usage.available`，为 `false` 时表示未返回而非 0）。
 
 业务逻辑不得解析错误文案，应使用 `error.category`、`error.code` 和 `retryable`。
 

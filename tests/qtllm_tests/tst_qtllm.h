@@ -39,6 +39,7 @@ private slots:
     void openAiCompatibleBuildPayloadProducesJson();
     void openAiCompatibleBuildPayloadAnthropicTools();
     void openAiCompatibleParseResponse();
+    void openAiCompatibleUsageReportsAvailability();
     void openAiCompatibleParseAnthropicResponse();
     void openAiCompatibleParseGoogleResponse();
     void openAiCompatibleParseStreamTokens();

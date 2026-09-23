@@ -50,7 +50,13 @@ HTTP 4xx/5xx 失败时，`message` 优先使用 Provider 响应体中的错误�
 
 兼容字段 `LlmResponse::errorMessage` 继续填充，并与 `error.message` 保持一致。
 
-## 5. 取消语义
+## 5. 结果用量
+
+成功响应可以通过 `LlmResponse::usage` 携带 Provider 上报的 token 用量（输入、输出、总量、推理和缓存命中）。读取计数前必须先检查 `LlmUsage::available`：为 `false` 时表示 Provider 未上报，计数属于未知，不能按 0 处理。
+
+OpenAI-compatible 的普通与流式响应都会解析用量；流式请求通过 `stream_options.include_usage` 请求末尾用量块，缺少该块的流式响应保持未知。原有直接读取 `usage` 计数字段的调用方保持源码兼容。
+
+## 6. 取消语义
 
 调用 `cancelCurrentRequest()` 时：
 
@@ -61,7 +67,7 @@ HTTP 4xx/5xx 失败时，`message` 优先使用 Provider 响应体中的错误�
 
 当前 `QtLLMClient` 不建立待启动请求队列，并发提交会被明确拒绝，因此不存在取消后仍自动启动的排队请求。Provider 选择和受管运行时启动仍是同步准备过程；控制权返回前不可抢占，这一限制不会被误报为已完成取消。独立句柄、并行请求和精确取消由 `RuntimeFacade::sendAsync()` 与 `RuntimeRequestHandle` 提供；本节仍描述单个 `QtLLMClient` 的单活动请求边界。
 
-## 6. 重试与流重置
+## 7. 重试与流重置
 
 `HttpExecutor` 对超时、一般网络错误以及 HTTP `408`、`425`、`429` 和 `5xx` 进行配置范围内的重试。其他 HTTP 客户端错误不自动重试。
 
@@ -75,7 +81,7 @@ HTTP 4xx/5xx 失败时，`message` 优先使用 Provider 响应体中的错误�
 
 流式界面应在收到 `streamReset` 时删除上一 attempt 已展示的临时内容。最终 `LlmResponse` 只包含成功 attempt 的内容，不混入失败 attempt 的缓冲。退避期间取消会停止计时器，不会再次发起网络请求。
 
-## 7. 集成建议
+## 8. 集成建议
 
 - 新代码以 `requestFinished` 作为唯一终态来源。
 - 使用 `requestId` 关联日志、流和最终响应。
@@ -83,7 +89,7 @@ HTTP 4xx/5xx 失败时，`message` 优先使用 Provider 响应体中的错误�
 - 业务回退依据 `error.category`、`error.code` 和 `retryable`，不要解析错误文案。
 - 旧代码可继续监听 `completed`、`responseReceived` 和 `errorOccurred`，迁移期间不要同时把新旧信号分别计为终态。
 
-## 8. 验证矩阵
+## 9. 验证矩阵
 
 | 环境 | 配置 | 全量构建 | CTest |
 | --- | --- | --- | --- |

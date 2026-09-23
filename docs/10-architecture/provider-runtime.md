@@ -46,6 +46,12 @@ Provider 负责协议 URL、请求载荷、普通响应和流式响应的差异�
 
 主要字段包括 `providerAvailable`、`providerAvailabilityStatus`、`providerAvailabilityMessage`、`resolvedRuntimeRoot`、`resolvedModelPath` 和 `localModelCount`。宿主配置界面应展示这些状态，而不是等请求失败后只显示通用错误。
 
+## 响应用量
+
+OpenAI-compatible 的普通与流式响应会解析 Provider 上报的 `usage`，写入 `LlmResponse::usage`；流式请求通过 `stream_options.include_usage` 要求末尾用量块。
+
+用量缺失表示未知：`LlmUsage::available` 为 `false`，token 计数不能按 0 解释。OpenAI Responses 路径当前不填充用量，同样保持 `available = false`。
+
 ## 非目标
 
 - 不自动决定宿主产品的安装目录和升级策略。

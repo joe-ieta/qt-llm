@@ -34,8 +34,11 @@ struct LlmMessage
     QVector<LlmToolCall> toolCalls;
 };
 
-// Provider-reported token usage for a completed request. All fields are 0
-// when the provider did not report usage.
+// Provider-reported token usage for a completed request. Missing usage means
+// unknown, so `available` is false and the token counts must not be
+// interpreted as zero. The counts are only meaningful when `available` is
+// true. `available` stays last to preserve positional aggregate initialization
+// for existing callers.
 struct LlmUsage
 {
     int inputTokens = 0;
@@ -43,6 +46,7 @@ struct LlmUsage
     int totalTokens = 0;
     int reasoningTokens = 0;
     int cachedInputTokens = 0;
+    bool available = false;
 };
 
 struct LlmRequest
@@ -101,7 +105,8 @@ struct LlmResponse
     LlmError error;
     StructuredOutputResult structuredOutput;
 
-    // Token usage reported by the provider (zeroed when unavailable).
+    // Token usage reported by the provider. Check usage.available before
+    // reading the token counts.
     LlmUsage usage;
 };
 

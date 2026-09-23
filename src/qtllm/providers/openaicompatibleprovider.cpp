@@ -292,6 +292,7 @@ LlmUsage parseOpenAiUsage(const QJsonObject &root)
         return usage;
     }
 
+    usage.available = true;
     usage.inputTokens = usageObject.value(QStringLiteral("prompt_tokens")).toInt();
     usage.outputTokens = usageObject.value(QStringLiteral("completion_tokens")).toInt();
     usage.totalTokens = usageObject.value(QStringLiteral("total_tokens")).toInt();
@@ -308,11 +309,6 @@ LlmUsage parseOpenAiUsage(const QJsonObject &root)
     }
 
     return usage;
-}
-
-bool hasUsage(const LlmUsage &usage)
-{
-    return usage.inputTokens > 0 || usage.outputTokens > 0 || usage.totalTokens > 0;
 }
 
 // DeepSeek thinking models reject continuation requests when the assistant
@@ -1038,7 +1034,7 @@ LlmResponse OpenAICompatibleProvider::parseResponse(const QByteArray &data) cons
                 state.lastRoot = root;
 
                 const LlmUsage eventUsage = parseOpenAiUsage(root);
-                if (hasUsage(eventUsage)) {
+                if (eventUsage.available) {
                     state.usage = eventUsage;
                 }
 
@@ -1154,7 +1150,7 @@ LlmResponse OpenAICompatibleProvider::parseResponse(const QByteArray &data) cons
                 state.lastRoot = root;
 
                 const LlmUsage eventUsage = parseOpenAiUsage(root);
-                if (hasUsage(eventUsage)) {
+                if (eventUsage.available) {
                     state.usage = eventUsage;
                 }
 
