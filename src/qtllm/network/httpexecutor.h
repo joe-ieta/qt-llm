@@ -35,6 +35,10 @@ struct HttpRequestError
     QString code;
     QString message;
     QString diagnostic;
+    // Raw provider response body (truncated) for HTTP-level failures. Kept so
+    // hosts can surface the provider's real error instead of only the generic
+    // network error string.
+    QString responseBody;
     bool retryable = false;
     int httpStatus = 0;
     int attempt = 0;

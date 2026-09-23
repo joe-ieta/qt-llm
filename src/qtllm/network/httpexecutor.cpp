@@ -1,11 +1,52 @@
 #include "httpexecutor.h"
 
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonValue>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QTimer>
 
 namespace qtllm {
+
+namespace {
+
+constexpr int kMaxErrorBodyChars = 4096;
+
+// Extracts a human-readable provider message from an OpenAI-compatible error
+// body ({"error":{"message":...}} and close variants). Returns an empty string
+// when the body carries no usable message.
+QString providerErrorMessage(const QByteArray &body)
+{
+    const QByteArray trimmed = body.trimmed();
+    if (trimmed.isEmpty()) {
+        return {};
+    }
+
+    const QJsonDocument document = QJsonDocument::fromJson(trimmed);
+    if (document.isObject()) {
+        const QJsonObject root = document.object();
+        const QJsonValue errorValue = root.value(QStringLiteral("error"));
+        if (errorValue.isObject()) {
+            const QString message = errorValue.toObject().value(QStringLiteral("message")).toString().trimmed();
+            if (!message.isEmpty()) {
+                return message;
+            }
+        } else if (errorValue.isString() && !errorValue.toString().trimmed().isEmpty()) {
+            return errorValue.toString().trimmed();
+        }
+
+        const QString message = root.value(QStringLiteral("message")).toString().trimmed();
+        if (!message.isEmpty()) {
+            return message;
+        }
+    }
+
+    return {};
+}
+
+} // namespace
 
 HttpExecutor::HttpExecutor(QObject *parent)
     : QObject(parent)
@@ -216,7 +257,12 @@ HttpRequestError HttpExecutor::classifyError(QNetworkReply *reply) const
     if (error.httpStatus >= 400) {
         error.category = HttpErrorCategory::Http;
         error.code = QStringLiteral("http_error");
-        error.message = error.diagnostic;
+        error.responseBody = QString::fromUtf8(m_buffer.left(kMaxErrorBodyChars));
+        const QString providerMessage = providerErrorMessage(m_buffer);
+        // Prefer the provider's own error message; fall back to the Qt network
+        // error string ("server replied with status code N") when the body has
+        // nothing usable.
+        error.message = providerMessage.isEmpty() ? error.diagnostic : providerMessage;
         error.retryable = error.httpStatus == 408 || error.httpStatus == 425
             || error.httpStatus == 429 || error.httpStatus >= 500;
         return error;
