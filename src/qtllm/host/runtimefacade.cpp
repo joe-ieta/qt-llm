@@ -9,6 +9,7 @@
 #include "../identity/compactid.h"
 #include "../runtime/managedllamacppruntime.h"
 #include "../runtime/managedllamacppruntimeservice.h"
+#include "../tools/runtime/toolcallorchestrator.h"
 #include "../toolsinside/toolsinsideruntime.h"
 
 #include <QEventLoop>
@@ -91,6 +92,14 @@ RuntimeProfile RuntimeFacade::profile() const
     return m_profile;
 }
 
+void RuntimeFacade::setToolCallOrchestrator(
+    const std::shared_ptr<tools::runtime::ToolCallOrchestrator> &orchestrator)
+{
+    m_toolLoopConfigured = true;
+    m_toolCallOrchestrator = orchestrator;
+    m_client->setToolCallOrchestrator(orchestrator);
+}
+
 ModelCapabilitySnapshot RuntimeFacade::modelCapabilities() const
 {
     return StructuredOutputService::capabilities(
@@ -146,6 +155,9 @@ RuntimeRequestHandle *RuntimeFacade::sendAsync(const ChatRequest &request)
 {
     auto *handle = new RuntimeRequestHandle(m_profile, request, this);
     handle->setManagedLlamaCppRuntimeService(m_runtimeService);
+    if (m_toolLoopConfigured) {
+        handle->setToolCallOrchestrator(m_toolCallOrchestrator);
+    }
     QTimer::singleShot(0, handle, &RuntimeRequestHandle::start);
     return handle;
 }

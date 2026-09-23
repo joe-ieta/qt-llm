@@ -10,6 +10,10 @@ namespace qtllm {
 class QtLLMClient;
 }
 
+namespace qtllm::tools::runtime {
+class ToolCallOrchestrator;
+}
+
 namespace qtllm::runtime {
 class ManagedLlamaCppRuntimeService;
 }
@@ -32,6 +36,10 @@ public:
     ChatResult result() const;
     void setManagedLlamaCppRuntimeService(
         const std::shared_ptr<runtime::ManagedLlamaCppRuntimeService> &service);
+    // Applies before start(); nullptr disables the library tool loop so tool
+    // calls are returned to the caller (host-driven External mode).
+    void setToolCallOrchestrator(
+        const std::shared_ptr<tools::runtime::ToolCallOrchestrator> &orchestrator);
 
 public slots:
     void start();

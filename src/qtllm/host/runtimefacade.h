@@ -11,6 +11,10 @@ namespace qtllm {
 class QtLLMClient;
 }
 
+namespace qtllm::tools::runtime {
+class ToolCallOrchestrator;
+}
+
 namespace qtllm::runtime {
 class ManagedLlamaCppRuntimeService;
 }
@@ -36,6 +40,13 @@ public:
         const std::shared_ptr<runtime::ManagedLlamaCppRuntimeService> &service);
     std::shared_ptr<runtime::ManagedLlamaCppRuntimeService>
     managedLlamaCppRuntimeService() const;
+
+    // Host-driven tool loops (External mode) can disable the library tool loop
+    // so tool calls are returned to the caller instead of being executed
+    // internally. Pass nullptr to disable; when never configured, the library
+    // loop keeps its default behavior.
+    void setToolCallOrchestrator(
+        const std::shared_ptr<tools::runtime::ToolCallOrchestrator> &orchestrator);
 
     RuntimeRequestHandle *sendAsync(const ChatRequest &request);
     void send(const ChatRequest &request);
@@ -63,6 +74,8 @@ private:
     ChatRequest m_activeRequest;
     QString m_configuredProviderName;
     bool m_requestActive = false;
+    bool m_toolLoopConfigured = false;
+    std::shared_ptr<tools::runtime::ToolCallOrchestrator> m_toolCallOrchestrator;
 };
 
 } // namespace qtllm::host

@@ -96,9 +96,9 @@ bool QtLLMClient::setProviderByName(const QString &providerName)
 void QtLLMClient::setToolCallOrchestrator(
     const std::shared_ptr<tools::runtime::ToolCallOrchestrator> &orchestrator)
 {
-    if (orchestrator) {
-        m_toolOrchestrator = orchestrator;
-    }
+    // Assign unconditionally so hosts can disable the library tool loop by
+    // passing nullptr (External mode / host-driven loops).
+    m_toolOrchestrator = orchestrator;
 }
 
 void QtLLMClient::setManagedLlamaCppRuntimeService(

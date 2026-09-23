@@ -5,6 +5,7 @@
 #include "../events/llmeventdispatcher.h"
 #include "../identity/compactid.h"
 #include "../structuredoutput/structuredoutputservice.h"
+#include "../tools/runtime/toolcallorchestrator.h"
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -96,6 +97,15 @@ RuntimeRequestHandle::RuntimeRequestHandle(const RuntimeProfile &profile,
 }
 
 RuntimeRequestHandle::~RuntimeRequestHandle() = default;
+
+void RuntimeRequestHandle::setToolCallOrchestrator(
+    const std::shared_ptr<tools::runtime::ToolCallOrchestrator> &orchestrator)
+{
+    if (m_started || m_finished) {
+        return;
+    }
+    m_client->setToolCallOrchestrator(orchestrator);
+}
 
 QString RuntimeRequestHandle::requestId() const
 {
