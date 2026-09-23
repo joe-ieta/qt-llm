@@ -45,6 +45,7 @@ struct OpenAiStreamState
     QHash<QString, PendingToolCall> toolCalls;
     QString finishReason;
     QString errorMessage;
+    LlmUsage usage;
 };
 
 bool containsAny(const QString &text, const QStringList &terms)
@@ -283,6 +284,60 @@ QString extractOpenAiReasoning(const QJsonObject &object)
     return parts.join(QString());
 }
 
+LlmUsage parseOpenAiUsage(const QJsonObject &root)
+{
+    LlmUsage usage;
+    const QJsonObject usageObject = root.value(QStringLiteral("usage")).toObject();
+    if (usageObject.isEmpty()) {
+        return usage;
+    }
+
+    usage.inputTokens = usageObject.value(QStringLiteral("prompt_tokens")).toInt();
+    usage.outputTokens = usageObject.value(QStringLiteral("completion_tokens")).toInt();
+    usage.totalTokens = usageObject.value(QStringLiteral("total_tokens")).toInt();
+    usage.reasoningTokens = usageObject.value(QStringLiteral("completion_tokens_details"))
+                                .toObject()
+                                .value(QStringLiteral("reasoning_tokens"))
+                                .toInt();
+    usage.cachedInputTokens = usageObject.value(QStringLiteral("prompt_tokens_details"))
+                                  .toObject()
+                                  .value(QStringLiteral("cached_tokens"))
+                                  .toInt();
+    if (usage.totalTokens == 0) {
+        usage.totalTokens = usage.inputTokens + usage.outputTokens;
+    }
+
+    return usage;
+}
+
+bool hasUsage(const LlmUsage &usage)
+{
+    return usage.inputTokens > 0 || usage.outputTokens > 0 || usage.totalTokens > 0;
+}
+
+// DeepSeek thinking models reject continuation requests when the assistant
+// reasoning channel is missing on recent assistant messages, even when the
+// model produced no reasoning for that turn. Sending an empty
+// reasoning_content satisfies the API contract.
+bool requiresReasoningChannel(const QString &vendor, const LlmRequest &request)
+{
+    if (vendor != QStringLiteral("deepseek")) {
+        return false;
+    }
+
+    if (!request.tools.isEmpty()) {
+        return true;
+    }
+
+    for (const LlmMessage &message : request.messages) {
+        if (message.role == QStringLiteral("tool") || !message.toolCalls.isEmpty()) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 QString toolCallKey(const QJsonObject &callObj, int fallbackIndex)
 {
     if (callObj.contains(QStringLiteral("index"))) {
@@ -363,7 +418,7 @@ void appendToolCallsToAssistant(const QHash<QString, PendingToolCall> &pendingCa
     }
 }
 
-QJsonObject toOpenAiMessage(const LlmMessage &message)
+QJsonObject toOpenAiMessage(const LlmMessage &message, bool includeReasoningChannel)
 {
     QJsonObject obj;
     obj.insert(QStringLiteral("role"), message.role);
@@ -378,7 +433,10 @@ QJsonObject toOpenAiMessage(const LlmMessage &message)
 
     // Thinking-mode models (DeepSeek V4/R1, Qwen, ...) require the assistant
     // reasoning channel to be passed back, especially on tool-call turns.
-    if (role == QStringLiteral("assistant") && !message.reasoningContent.isEmpty()) {
+    // DeepSeek additionally rejects continuations when the field is absent
+    // entirely, so callers can request an explicit empty value.
+    if (role == QStringLiteral("assistant")
+        && (!message.reasoningContent.isEmpty() || includeReasoningChannel)) {
         obj.insert(QStringLiteral("reasoning_content"), message.reasoningContent);
     }
 
@@ -409,11 +467,11 @@ QJsonObject toOpenAiMessage(const LlmMessage &message)
     return obj;
 }
 
-QJsonArray toOpenAiMessages(const QVector<LlmMessage> &messages)
+QJsonArray toOpenAiMessages(const QVector<LlmMessage> &messages, bool includeReasoningChannel)
 {
     QJsonArray array;
     for (const LlmMessage &message : messages) {
-        array.append(toOpenAiMessage(message));
+        array.append(toOpenAiMessage(message, includeReasoningChannel));
     }
     return array;
 }
@@ -685,6 +743,7 @@ LlmResponse parseOpenAiResponse(const QJsonObject &root)
     assistant.reasoningContent = reasoningText;
     response.assistantMessage = assistant;
     response.text = !assistant.content.isEmpty() ? assistant.content : reasoningText;
+    response.usage = parseOpenAiUsage(root);
 
     if (!response.text.isEmpty() || !assistant.toolCalls.isEmpty()) {
         response.success = true;
@@ -938,7 +997,14 @@ QByteArray OpenAICompatibleProvider::buildPayload(const LlmRequest &request) con
 
     root.insert(QStringLiteral("model"), model);
     root.insert(QStringLiteral("stream"), request.stream);
-    root.insert(QStringLiteral("messages"), toOpenAiMessages(messages));
+    root.insert(QStringLiteral("messages"),
+                toOpenAiMessages(messages, requiresReasoningChannel(vendor, request)));
+    if (request.stream) {
+        // Ask OpenAI-compatible providers to report usage on the final stream
+        // chunk so hosts can track context consumption.
+        root.insert(QStringLiteral("stream_options"),
+                    QJsonObject{{QStringLiteral("include_usage"), true}});
+    }
     if (!request.tools.isEmpty()) {
         root.insert(QStringLiteral("tools"), request.tools);
     }
@@ -970,6 +1036,11 @@ LlmResponse OpenAICompatibleProvider::parseResponse(const QByteArray &data) cons
 
                 const QJsonObject root = event.object;
                 state.lastRoot = root;
+
+                const LlmUsage eventUsage = parseOpenAiUsage(root);
+                if (hasUsage(eventUsage)) {
+                    state.usage = eventUsage;
+                }
 
                 if (root.contains(QStringLiteral("error")) && state.errorMessage.isEmpty()) {
                     state.errorMessage = root.value(QStringLiteral("error")).toObject()
@@ -1025,6 +1096,7 @@ LlmResponse OpenAICompatibleProvider::parseResponse(const QByteArray &data) cons
             response.text = response.assistantMessage.content;
             appendToolCallsToAssistant(state.toolCalls, response.assistantMessage);
             response.success = !response.text.isEmpty() || !response.assistantMessage.toolCalls.isEmpty();
+            response.usage = state.usage;
 
             if (!response.success) {
                 response = parseOpenAiResponse(state.lastRoot);
@@ -1080,6 +1152,12 @@ LlmResponse OpenAICompatibleProvider::parseResponse(const QByteArray &data) cons
             OpenAiStreamState state;
             for (const QJsonObject &root : jsonLines) {
                 state.lastRoot = root;
+
+                const LlmUsage eventUsage = parseOpenAiUsage(root);
+                if (hasUsage(eventUsage)) {
+                    state.usage = eventUsage;
+                }
+
                 if (root.contains(QStringLiteral("error")) && state.errorMessage.isEmpty()) {
                     state.errorMessage = root.value(QStringLiteral("error")).toObject()
                                            .value(QStringLiteral("message")).toString();
@@ -1141,6 +1219,7 @@ LlmResponse OpenAICompatibleProvider::parseResponse(const QByteArray &data) cons
             response.text = response.assistantMessage.content;
             appendToolCallsToAssistant(state.toolCalls, response.assistantMessage);
             response.success = !response.text.isEmpty() || !response.assistantMessage.toolCalls.isEmpty();
+            response.usage = state.usage;
 
             if (!response.success && !state.lastRoot.isEmpty()) {
                 response = parseOpenAiResponse(state.lastRoot);

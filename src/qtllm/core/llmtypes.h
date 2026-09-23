@@ -34,6 +34,17 @@ struct LlmMessage
     QVector<LlmToolCall> toolCalls;
 };
 
+// Provider-reported token usage for a completed request. All fields are 0
+// when the provider did not report usage.
+struct LlmUsage
+{
+    int inputTokens = 0;
+    int outputTokens = 0;
+    int totalTokens = 0;
+    int reasoningTokens = 0;
+    int cachedInputTokens = 0;
+};
+
 struct LlmRequest
 {
     QVector<LlmMessage> messages;
@@ -89,6 +100,9 @@ struct LlmResponse
     bool canceled = false;
     LlmError error;
     StructuredOutputResult structuredOutput;
+
+    // Token usage reported by the provider (zeroed when unavailable).
+    LlmUsage usage;
 };
 
 struct LlmStreamDelta
