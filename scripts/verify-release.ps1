@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$CMakePath = 'E:\Qt\Tools\CMake_64\bin\cmake.exe',
     [string]$Qt5Root = 'E:\Qt\5.15.2\msvc2019_64',
