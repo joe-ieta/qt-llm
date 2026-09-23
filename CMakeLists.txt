@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(qt-llm
-    VERSION 0.2.12
+    VERSION 0.2.13
     LANGUAGES CXX
 )
 
