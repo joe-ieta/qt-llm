@@ -1661,31 +1661,74 @@ void QtLlmCoreTests::streamChunkParserTakePendingLine()
     QCOMPARE(parser.takePendingLine(), QString());
 }
 
+namespace {
+
+// Serves local HTTP requests for the executor tests. The response is produced
+// only after the complete request (headers plus the declared body) has been
+// received. Responding earlier and closing makes QNetworkAccessManager
+// transparently resend the POST, which double-counts connections and makes the
+// assertions racy. `responseForConnection` receives the 1-based connection
+// ordinal.
+template <typename ResponseFactory>
+void serveLocalHttp(QTcpServer *server, int *connectionCount,
+                    ResponseFactory responseForConnection)
+{
+    QObject::connect(server, &QTcpServer::newConnection, server,
+                     [server, connectionCount, responseForConnection]() {
+        while (server->hasPendingConnections()) {
+            QTcpSocket *socket = server->nextPendingConnection();
+            QObject::connect(socket, &QTcpSocket::readyRead, socket,
+                             [socket, connectionCount, responseForConnection,
+                              pending = QByteArray()]() mutable {
+                if (socket->property("qtllmTestResponded").toBool()) {
+                    return;
+                }
+
+                pending.append(socket->readAll());
+                const int headerEnd = pending.indexOf("\r\n\r\n");
+                if (headerEnd < 0) {
+                    return;
+                }
+
+                int contentLength = 0;
+                const QList<QByteArray> headerLines = pending.left(headerEnd).split('\n');
+                for (const QByteArray &line : headerLines) {
+                    if (line.toLower().startsWith("content-length:")) {
+                        contentLength = line.mid(line.indexOf(':') + 1).trimmed().toInt();
+                    }
+                }
+                if (pending.size() < headerEnd + 4 + contentLength) {
+                    return;
+                }
+
+                socket->setProperty("qtllmTestResponded", true);
+                ++(*connectionCount);
+                socket->write(responseForConnection(*connectionCount));
+                socket->disconnectFromHost();
+            });
+            QObject::connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+        }
+    });
+}
+
+} // namespace
+
 void QtLlmCoreTests::httpExecutorRetriesWithFreshBuffer()
 {
     QTcpServer server;
     QVERIFY(server.listen(QHostAddress::LocalHost));
 
     int connectionCount = 0;
-    connect(&server, &QTcpServer::newConnection, &server, [&]() {
-        while (server.hasPendingConnections()) {
-            QTcpSocket *socket = server.nextPendingConnection();
-            connect(socket, &QTcpSocket::readyRead, socket, [&, socket]() {
-                socket->readAll();
-                ++connectionCount;
-                const QByteArray payload = connectionCount == 1 ? QByteArrayLiteral("first-attempt")
-                                                                  : QByteArrayLiteral("second-attempt");
-                QByteArray response = connectionCount == 1
-                    ? QByteArrayLiteral("HTTP/1.1 503 Service Unavailable\r\n")
-                    : QByteArrayLiteral("HTTP/1.1 200 OK\r\n");
-                response += "Content-Length: " + QByteArray::number(payload.size()) + "\r\n";
-                response += QByteArrayLiteral("Connection: close\r\n\r\n");
-                response += payload;
-                socket->write(response);
-                socket->disconnectFromHost();
-            });
-            connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
-        }
+    serveLocalHttp(&server, &connectionCount, [](int connection) {
+        const QByteArray payload = connection == 1 ? QByteArrayLiteral("first-attempt")
+                                                   : QByteArrayLiteral("second-attempt");
+        QByteArray response = connection == 1
+            ? QByteArrayLiteral("HTTP/1.1 503 Service Unavailable\r\n")
+            : QByteArrayLiteral("HTTP/1.1 200 OK\r\n");
+        response += "Content-Length: " + QByteArray::number(payload.size()) + "\r\n";
+        response += QByteArrayLiteral("Connection: close\r\n\r\n");
+        response += payload;
+        return response;
     });
 
     HttpExecutor executor;
@@ -1712,22 +1755,13 @@ void QtLlmCoreTests::httpExecutorCancelDuringRetryBackoffDoesNotRestart()
     QVERIFY(server.listen(QHostAddress::LocalHost));
 
     int connectionCount = 0;
-    connect(&server, &QTcpServer::newConnection, &server, [&]() {
-        while (server.hasPendingConnections()) {
-            QTcpSocket *socket = server.nextPendingConnection();
-            connect(socket, &QTcpSocket::readyRead, socket, [&, socket]() {
-                socket->readAll();
-                ++connectionCount;
-                const QByteArray payload = QByteArrayLiteral("retry-later");
-                QByteArray response = QByteArrayLiteral("HTTP/1.1 503 Service Unavailable\r\n");
-                response += "Content-Length: " + QByteArray::number(payload.size()) + "\r\n";
-                response += QByteArrayLiteral("Connection: close\r\n\r\n");
-                response += payload;
-                socket->write(response);
-                socket->disconnectFromHost();
-            });
-            connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
-        }
+    serveLocalHttp(&server, &connectionCount, [](int) {
+        const QByteArray payload = QByteArrayLiteral("retry-later");
+        QByteArray response = QByteArrayLiteral("HTTP/1.1 503 Service Unavailable\r\n");
+        response += "Content-Length: " + QByteArray::number(payload.size()) + "\r\n";
+        response += QByteArrayLiteral("Connection: close\r\n\r\n");
+        response += payload;
+        return response;
     });
 
     HttpExecutor executor;
@@ -1836,24 +1870,15 @@ void QtLlmCoreTests::runtimeFacadeParallelHandlesKeepRequestAttribution()
     QVERIFY(server.listen(QHostAddress::LocalHost));
 
     int connectionCount = 0;
-    connect(&server, &QTcpServer::newConnection, &server, [&]() {
-        while (server.hasPendingConnections()) {
-            QTcpSocket *socket = server.nextPendingConnection();
-            connect(socket, &QTcpSocket::readyRead, socket, [&, socket]() {
-                socket->readAll();
-                ++connectionCount;
-                const QByteArray payload = QByteArrayLiteral(
-                    R"({"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]})");
-                QByteArray response = QByteArrayLiteral("HTTP/1.1 200 OK\r\n");
-                response += QByteArrayLiteral("Content-Type: application/json\r\n");
-                response += "Content-Length: " + QByteArray::number(payload.size()) + "\r\n";
-                response += QByteArrayLiteral("Connection: close\r\n\r\n");
-                response += payload;
-                socket->write(response);
-                socket->disconnectFromHost();
-            });
-            connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
-        }
+    serveLocalHttp(&server, &connectionCount, [](int) {
+        const QByteArray payload = QByteArrayLiteral(
+            R"({"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]})");
+        QByteArray response = QByteArrayLiteral("HTTP/1.1 200 OK\r\n");
+        response += QByteArrayLiteral("Content-Type: application/json\r\n");
+        response += "Content-Length: " + QByteArray::number(payload.size()) + "\r\n";
+        response += QByteArrayLiteral("Connection: close\r\n\r\n");
+        response += payload;
+        return response;
     });
 
     host::RuntimeProfile profile;
