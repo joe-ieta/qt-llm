@@ -29,7 +29,7 @@
 | --- | --- | --- |
 | `QtLLMClient` | `qtllm` | `<core/qtllmclient.h>` |
 | `LlmConfig` | `qtllm` | `<core/llmconfig.h>` |
-| `LlmMessage` / `LlmRequest` / `LlmResponse` | `qtllm` | `<core/llmtypes.h>` |
+| `LlmMessage` / `LlmRequest` / `LlmResponse` / `LlmUsage` | `qtllm` | `<core/llmtypes.h>` |
 | `LlmError` / `LlmErrorCategory` | `qtllm` | `<core/llmtypes.h>` |
 | `ContextWindowService` | `qtllm::context` | `<context/contextwindowservice.h>` |
 | `StructuredOutputService` | `qtllm::structuredoutput` | `<structuredoutput/structuredoutputservice.h>` |

@@ -33,6 +33,8 @@
 
 qt-llm 不会在 External 模式中自行启动任意宿主程序。它负责稳定 ID、授权结果、数量限制、结果配对和工具循环恢复；调度、超时和取消由宿主负责。
 
+需要完全由宿主驱动工具循环、不经过编排器时，可在请求开始前调用 `RuntimeFacade::setToolCallOrchestrator(nullptr)` 或 `RuntimeRequestHandle::setToolCallOrchestrator(nullptr)` 关闭库内工具循环，工具调用随最终响应返回宿主处理。
+
 ## 授权与取消
 
 `ToolRuntimeHooks::authorize()` 返回 Allow、Deny 或 Pending。Pending 不是失败，宿主应完成授权后重新提交。`cancelBySession()` 只向声明支持取消且仍在执行的执行器传播尽力取消。

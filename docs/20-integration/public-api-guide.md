@@ -42,6 +42,7 @@ target_link_libraries(my_app PRIVATE QtLlm::Core QtLlm::Diagnostics)
 - `tokenReceived` 与 `reasoningTokenReceived` 分离内容和推理增量。
 - `streamReset` 要求 UI 丢弃失败重试产生的临时文本。
 - `finished(ChatResult)` 是句柄唯一终态。
+- 需要完全由宿主驱动工具循环时，可在请求开始前调用 `setToolCallOrchestrator(nullptr)` 关闭库内工具循环，工具调用随最终响应返回。
 
 句柄默认以 facade 为父对象。需要终态确认时，不要直接销毁活动句柄；先调用 `cancel()` 并等待 `finished()`。
 
@@ -53,7 +54,7 @@ target_link_libraries(my_app PRIVATE QtLlm::Core QtLlm::Diagnostics)
 - `canceled`：是否由取消结束。
 - `requestId`：请求关联 ID。
 - `error`：结构化类别、错误码、诊断和可重试信息。
-- `response`：底层 `LlmResponse`，包含助手消息、结束原因和结构化输出。
+- `response`：底层 `LlmResponse`，包含助手消息、结束原因、结构化输出和 Provider 用量（`usage`）。
 
 业务逻辑不得解析错误文案，应使用 `error.category`、`error.code` 和 `retryable`。
 

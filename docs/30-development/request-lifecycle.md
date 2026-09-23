@@ -46,6 +46,8 @@
 | `httpStatus` | 可用时返回 HTTP 状态，否则为 `0` |
 | `attempt` | 产生最终错误的传输尝试序号，从 `1` 开始 |
 
+HTTP 4xx/5xx 失败时，`message` 优先使用 Provider 响应体中的错误说明，取不到时回退为网络层诊断；`HttpRequestError::responseBody` 保留截断后的原始响应体供宿主展示。
+
 兼容字段 `LlmResponse::errorMessage` 继续填充，并与 `error.message` 保持一致。
 
 ## 5. 取消语义

@@ -17,7 +17,7 @@ target_link_libraries(advanced_client PRIVATE QtLlm::Conversation)
 
 - `setConfig(const LlmConfig&)`
 - `setProvider(...)` / `setProviderByName(...)`
-- `setToolCallOrchestrator(...)`
+- `setToolCallOrchestrator(...)`：传入 `nullptr` 关闭库内工具循环，工具调用随最终响应返回调用方处理。
 - `setManagedLlamaCppRuntimeService(...)`
 - `sendPrompt(...)` / `sendRequest(...)`
 - `cancelCurrentRequest()`

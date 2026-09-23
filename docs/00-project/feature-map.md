@@ -2,7 +2,7 @@
 
 ## 已实现并验证
 
-- 统一请求类型、流式增量、请求 ID、结构化错误、唯一终态、取消和受控重试。
+- 统一请求类型、流式增量、请求 ID、结构化错误、唯一终态、取消、受控重试和 Provider token 用量。
 - `RuntimeFacade::sendAsync()` 与独立 `RuntimeRequestHandle`，支持并行请求和精确取消。
 - `QtLLMClient` 高级请求入口及原有兼容信号。
 - OpenAI、OpenAI-compatible、Ollama、vLLM 和 llama.cpp Provider。
